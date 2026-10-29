@@ -422,6 +422,28 @@ describe('world', () => {
     expect(world.gapTo(karts[0], karts[2])).toBe(-30);
   });
 
+  test('kartAhead / kartBehind skip finished karts (they lead the ranking but are out of the race)', () => {
+    const karts = mkKarts(4);
+    const world = createWorld(karts, track);
+    const [done, a, b, c] = karts;
+    done.finishedAt = 60;
+    done.distance = 10; // frozen at the line while it keeps driving
+    a.distance = 300;
+    b.distance = 200;
+    c.distance = 100;
+    expect(world.kartAhead(a)).toBeNull();
+    expect(world.kartAhead(b)).toBe(a);
+    expect(world.kartBehind(c)).toBeNull();
+    // A finished kart's neighbours are racing karts too.
+    expect(world.kartAhead(done)).toBeNull();
+    expect(world.kartBehind(done)).toBe(a);
+    // Only finished karts around: nobody.
+    a.finishedAt = b.finishedAt = 61;
+    expect(world.kartAhead(c)).toBeNull();
+    c.finishedAt = 62;
+    expect(world.kartBehind(done)).toBeNull();
+  });
+
   test('drains are empty when nothing happened', () => {
     const world = createWorld(mkKarts(1), track);
     expect(world.drainSfx()).toEqual([]);

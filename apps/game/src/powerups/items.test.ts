@@ -114,6 +114,30 @@ describe('mine', () => {
     expect(world.entities).toEqual([]);
   });
 
+  test('a spinning kart drops its mine behind where it is going, not behind its nose', () => {
+    const karts = mkKarts(1);
+    const world = createWorld(karts, track);
+    const k = karts[0];
+    placeAt(k, 20);
+    const h = k.heading;
+    // Sliding along the track while spun round to face backwards.
+    k.vel = { x: Math.sin(h) * 12, z: Math.cos(h) * 12 };
+    k.speed = 12;
+    k.spin = 0.8;
+    k.heading = h + Math.PI;
+    const m = fire(k, 'mine', world);
+    expect(m.pos.x).toBeCloseTo(k.pos.x - Math.sin(h) * 2.5, 9);
+    expect(m.pos.z).toBeCloseTo(k.pos.z - Math.cos(h) * 2.5, 9);
+
+    // Spinning on the spot: falls back to behind the nose.
+    k.vel = { x: 0, z: 0 };
+    k.speed = 0;
+    k.heading = 1;
+    const m2 = fire(k, 'mine', world);
+    expect(m2.pos.x).toBeCloseTo(k.pos.x - Math.sin(1) * 2.5, 9);
+    expect(m2.pos.z).toBeCloseTo(k.pos.z - Math.cos(1) * 2.5, 9);
+  });
+
   test('mine expires after 30 s', () => {
     const karts = mkKarts(1);
     const world = createWorld(karts, track);
@@ -193,6 +217,82 @@ describe('rocket', () => {
     expect(target.spin).toBe(SPIN_TIME);
     expect(maxLateral).toBeLessThan(track.width / 2);
     expect(headingOk).toBe(true);
+  });
+
+  test('rocket crosses the start line to its target', () => {
+    const karts = mkKarts(2);
+    const world = createWorld(karts, track);
+    const [shooter, target] = karts;
+    const L = track.length;
+    placeAt(shooter, L - 15);
+    placeAt(target, L + 15);
+    const r = fire(shooter, 'rocket', world);
+    expect(r.targetId).toBe(target.id);
+    let steps = 0;
+    for (; steps < 120 && world.entities.indexOf(r) >= 0; steps++) world.step(DT);
+    expect(steps).toBeLessThan(120);
+    expect(target.spin).toBe(SPIN_TIME);
+  });
+
+  test('rocket skips finished karts: it targets the next kart still racing, or nobody', () => {
+    const karts = mkKarts(3);
+    const world = createWorld(karts, track);
+    const [shooter, racing, done] = karts;
+    placeAt(shooter, 10);
+    placeAt(racing, 40);
+    placeAt(done, 30);
+    done.finishedAt = 90; // ranked first, its distance frozen
+    expect(fire(shooter, 'rocket', world).targetId).toBe(racing.id);
+    expect(fire(racing, 'rocket', world).targetId).toBeUndefined();
+    world.entities.length = 0;
+  });
+
+  test('a target that finishes mid-flight is released and the rocket flies straight on', () => {
+    const karts = mkKarts(2);
+    const world = createWorld(karts, track);
+    const [shooter, target] = karts;
+    placeAt(shooter, 0);
+    placeAt(target, 45);
+    const r = fire(shooter, 'rocket', world);
+    for (let i = 0; i < 10; i++) world.step(DT);
+    expect(r.targetId).toBe(target.id);
+    target.finishedAt = 30;
+    world.step(DT);
+    expect(r.targetId).toBeUndefined();
+    const h = r.heading;
+    const p = { ...r.pos };
+    world.step(DT);
+    expect(r.heading).toBeCloseTo(h, 9);
+    expect(Math.atan2(r.pos.x - p.x, r.pos.z - p.z)).toBeCloseTo(h, 6);
+    // Gone within 3 s more (wall or timeout), without chasing the finished kart.
+    target.pos = { x: 999, z: 999 };
+    let steps = 0;
+    for (; steps < 181 && world.entities.indexOf(r) >= 0; steps++) world.step(DT);
+    expect(steps).toBeLessThanOrEqual(180);
+    expect(target.spin).toBe(0);
+  });
+
+  test('a homing rocket pops at the wall instead of flying through it', () => {
+    const karts = mkKarts(2);
+    const world = createWorld(karts, track);
+    const [shooter, target] = karts;
+    placeAt(shooter, 10);
+    placeAt(target, 18);
+    const r = fire(shooter, 'rocket', world);
+    world.drainSfx();
+    // The target sits beyond the right-hand wall: homing straight at it must stop at the wall.
+    const out = track.pointAt(20, track.width / 2 + 6);
+    target.pos = { x: out.x, z: out.z };
+    let maxLateral = 0;
+    let steps = 0;
+    for (; steps < 60 && world.entities.indexOf(r) >= 0; steps++) {
+      world.step(DT);
+      maxLateral = Math.max(maxLateral, Math.abs(track.project(r.pos).lateral));
+    }
+    expect(steps).toBeLessThan(60);
+    expect(maxLateral).toBeLessThan(track.width / 2 + 1);
+    expect(target.spin).toBe(0);
+    expect(world.drainSfx()).toEqual(['rocket_explode']);
   });
 
   test('rocket blocked by target shield: target not spun, shield gone', () => {
@@ -309,5 +409,10 @@ describe('weights and bots', () => {
     expect(mine().botShouldUse?.(ctx(world, me))).toBe(true);
     placeAt(other, 80); // 20 m behind
     expect(mine().botShouldUse?.(ctx(world, me))).toBe(false);
+
+    // The only kart ahead has finished (ranked first, distance frozen): no rocket.
+    placeAt(other, 120);
+    other.finishedAt = 50;
+    expect(rocket().botShouldUse?.(ctx(world, me))).toBe(false);
   });
 });

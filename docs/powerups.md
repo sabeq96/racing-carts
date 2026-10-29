@@ -86,7 +86,8 @@ What `use` can do, all through `WorldApi`:
   `onHitKart` runs for *every* kart it touches, owner included, so the entity decides about its owner itself
   (the mine spares it for 0.5 s, the rocket always). Set `dead = true` to remove the entity. Give it `targetId` if it homes in on a kart;
   a bot that holds a shield then raises it.
-- **Race order:** `kartAhead`, `kartBehind` and `gapTo`.
+- **Race order:** `kartAhead`, `kartBehind` and `gapTo`. The neighbours are only karts still racing: finished
+  karts rank first but are skipped, and `null` means nobody.
 - **Sound:** `sfx(name)`.
 
 ## When you need more than one file

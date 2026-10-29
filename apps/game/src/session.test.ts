@@ -409,7 +409,7 @@ test('bots drive: empty slots and a dropped player\'s kart advance on their own 
     for (const id of [1, 2, 3]) if (game.karts[id].speed > 8) atSpeed.add(id);
     stepFor(game, session, 1);
   }
-  expect([...atSpeed].sort()).toEqual([1, 2, 3]);
+  expect([...atSpeed].sort((x, y) => x - y)).toEqual([1, 2, 3]);
   // Ada is a human sending nothing: no bot drives her kart (bumps from passing bots may nudge it).
   expect(session.driverFor(0)).toMatchObject({ kind: 'human' });
   expect(session.driverFor(0).input()).toEqual(NEUTRAL_INPUT);

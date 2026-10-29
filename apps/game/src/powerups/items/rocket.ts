@@ -14,10 +14,11 @@ const UNTARGETED_LIFE = 3;
 const EPS = 1e-9;
 
 /**
- * Homes on the next kart ahead. It flies 40 m/s along the track, drifting from the shooter's lane to the
- * target's, then for the last 10 m straight at the target. It spins the first kart it touches (never
- * its owner), unless a shield takes the hit. With nobody ahead it flies straight on and pops at the wall
- * or after 3 s. It gives up after 6 s. Mostly for the back of the pack.
+ * Homes on the next kart ahead that is still racing. It flies 40 m/s along the track, drifting from the
+ * shooter's lane to the target's, then for the last 10 m straight at the target (popping if that line
+ * meets a wall). It spins the first kart it touches (never its owner), unless a shield takes the hit.
+ * With nobody ahead, or once its target finishes the race, it flies straight on and pops at the wall or
+ * after 3 s of that. It gives up after 6 s. Mostly for the back of the pack.
  */
 export const rocket: PowerupDef = {
   id: 'rocket',
@@ -27,19 +28,31 @@ export const rocket: PowerupDef = {
   use({ kart, world }) {
     const track = world.track;
     const ownerId = kart.id;
-    const target = world.kartAhead(kart);
+    /** Released (set to null) if it finishes the race mid-flight. */
+    let target = world.kartAhead(kart);
     const startD = kart.distance + START_AHEAD;
     const startLateral = track.project(kart.pos, kart.trackIndex).lateral;
-    const fx = Math.sin(kart.heading), fz = Math.cos(kart.heading);
+    /** Straight-flight direction: the shooter's heading, or the rocket's own when its target is released. */
+    let fx = Math.sin(kart.heading), fz = Math.cos(kart.heading);
     /** Its own distance along the track (same scale as `kart.distance`). */
     let d = startD;
     let homing = false;
     let age = 0;
+    /** Seconds of straight flight (without a target). */
+    let straightAge = 0;
+    /** Track sample near the rocket, so projecting it only searches nearby. */
     let hint = kart.trackIndex;
+    const samples = track.points.length;
 
     const explode = (e: PowerupEntity, w: WorldApi): void => {
       w.sfx('rocket_explode');
       e.dead = true;
+    };
+    /** Pops the rocket if it has left the road (the walls stand at ±width/2). */
+    const popOffRoad = (e: PowerupEntity, w: WorldApi): void => {
+      const pr = track.project(e.pos, hint);
+      hint = pr.index;
+      if (Math.abs(pr.lateral) > track.width / 2) explode(e, w);
     };
 
     const shot: PowerupEntity = {
@@ -59,17 +72,24 @@ export const rocket: PowerupDef = {
         }
         const step = SPEED * dt;
 
+        if (target && target.finishedAt !== null) {
+          // Its target crossed the finish line: let it go and fly straight on.
+          target = null;
+          this.targetId = undefined;
+          fx = Math.sin(this.heading);
+          fz = Math.cos(this.heading);
+        }
+
         if (!target) {
-          // Nobody ahead: straight on until the wall or 3 s.
+          // Nobody to chase: straight on until the wall or 3 s.
+          straightAge += dt;
           this.pos.x += fx * step;
           this.pos.z += fz * step;
-          if (age >= UNTARGETED_LIFE - EPS) {
+          if (straightAge >= UNTARGETED_LIFE - EPS) {
             this.dead = true;
             return;
           }
-          const pr = track.project(this.pos, hint);
-          hint = pr.index;
-          if (Math.abs(pr.lateral) > track.width / 2) explode(this, w);
+          popOffRoad(this, w);
           return;
         }
 
@@ -83,6 +103,8 @@ export const rocket: PowerupDef = {
             this.pos.z += dz * t;
             this.heading = Math.atan2(dx, dz);
           }
+          // The straight line can cut across a bend: never through a wall.
+          popOffRoad(this, w);
           return;
         }
 
@@ -97,6 +119,8 @@ export const rocket: PowerupDef = {
         this.heading = Math.atan2(p.x - this.pos.x, p.z - this.pos.z);
         this.pos.x = p.x;
         this.pos.z = p.z;
+        const s = ((d % track.length) + track.length) % track.length;
+        hint = Math.min(samples - 1, Math.floor((s / track.length) * samples));
       },
       onHitKart(k, w) {
         if (k.id === ownerId) return;

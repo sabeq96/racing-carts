@@ -76,13 +76,16 @@ export function createWorld(karts: Kart[], track: Track): World {
     },
 
     kartAhead(k) {
-      const i = rankIndex(k);
-      return i > 0 ? ranked[i - 1] : null;
+      // Finished karts rank first but are out of the race: skip them.
+      for (let i = rankIndex(k) - 1; i >= 0; i--) if (ranked[i].finishedAt === null) return ranked[i];
+      return null;
     },
 
     kartBehind(k) {
       const i = rankIndex(k);
-      return i >= 0 && i < ranked.length - 1 ? ranked[i + 1] : null;
+      if (i < 0) return null;
+      for (let j = i + 1; j < ranked.length; j++) if (ranked[j].finishedAt === null) return ranked[j];
+      return null;
     },
 
     gapTo(a, b) {

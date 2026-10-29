@@ -11,6 +11,8 @@ export interface RollContext {
 /**
  * How render draws an entity (generically, no per-item render code): a simple pastel shape `size` metres
  * across, its centre at height `y` (default: resting on the ground), turned to `heading`.
+ * Render reads the look once, when it creates the entity's mesh; changing it afterwards has no effect
+ * (position and `heading` are read every frame).
  * - `sphere`, `box`: `size` across; `height` overrides the vertical size.
  * - `disc`: a flat cylinder `size` across and `height` thick (default 0.1): a puddle, a pad.
  * - `cone`: lying down, nose pointing along `heading`, `size` across at the base and 2 × `size` long.
@@ -62,7 +64,10 @@ export interface WorldApi {
    * `shield_break`); true → spin = SPIN_TIME, speed × 0.2, sfx `kart_spinout`, phone `hit` event.
    */
   hitKart(k: Kart): boolean;
-  /** Neighbours in race order (`rankKarts`), or null at either end. */
+  /**
+   * Nearest neighbours in race order (`rankKarts`) that are still racing (`finishedAt === null`), or null
+   * when there is none. Finished karts rank first but are skipped: their `distance` is frozen at the line.
+   */
   kartAhead(k: Kart): Kart | null;
   kartBehind(k: Kart): Kart | null;
   /** b.distance − a.distance: metres along the track from a to b (positive when b is ahead). */
