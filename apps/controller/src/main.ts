@@ -10,6 +10,10 @@ type Screen = 'join' | 'lobby' | 'drive';
 const SAMPLE_WAIT_MS = 1000;
 const SETTLE_MS = 200;
 const FALLBACK_NAME_MAX = 12;
+/** What the TV shows when a phone sends an empty name; the phone shows the same. */
+const DEFAULT_NAME = 'Player';
+/** No `welcome` this long after tapping start: the code is probably wrong or the TV is off. */
+const JOIN_TIMEOUT_MS = 15000;
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -101,6 +105,8 @@ function setKartColor(color: string): void {
 
 const params = new URLSearchParams(location.search);
 const addressParam = (params.get('address') ?? '').trim().toUpperCase();
+/** The room code from the QR link; cleared when it turns out wrong, so the typed code is used. */
+let linkCode = addressParam;
 const demo = params.get('demo');
 
 let link: Link | null = null;
@@ -110,6 +116,7 @@ let lastState: StateMsg | null = null;
 let isHost = false;
 let buttonSteer = false;
 let started = false;
+let joinTimer: ReturnType<typeof setTimeout> | undefined;
 
 // controls
 let gas = false;
@@ -139,7 +146,9 @@ function render(): void {
   const screen = currentScreen();
   document.body.dataset.screen = screen;
 
-  els.banner.hidden = !(link && link.status === 'retrying');
+  // Before the first welcome the banner only shows while a join is in progress (not over the join error).
+  els.banner.hidden = !(link && link.status === 'retrying') || (!welcomed && !started);
+  els.banner.textContent = welcomed ? 'Reconnecting…' : 'Looking for the TV…';
 
   if (screen === 'lobby') {
     els.startRaceBtn.hidden = !isHost;
@@ -291,7 +300,7 @@ async function goLandscape(): Promise<void> {
 
 async function start(): Promise<void> {
   if (started) return;
-  const code = (addressParam || els.codeInput.value).trim().toUpperCase();
+  const code = (linkCode || els.codeInput.value).trim().toUpperCase();
   if (code.length < 4) {
     showJoinError('Type the 4 letters from the TV');
     els.codeInput.focus();
@@ -300,8 +309,9 @@ async function start(): Promise<void> {
   started = true;
   showJoinError('');
   setBusy(true);
-  name = els.nameInput.value.trim().slice(0, FALLBACK_NAME_MAX);
-  store('rc.name', name);
+  const typedName = els.nameInput.value.trim().slice(0, FALLBACK_NAME_MAX);
+  store('rc.name', typedName);
+  name = typedName || DEFAULT_NAME;
 
   // Permission prompts must be requested straight from the tap, before anything slow.
   const granted = await askMotionPermission();
@@ -321,20 +331,43 @@ async function start(): Promise<void> {
 
   void requestWakeLock();
 
+  if (welcomed) return; // the earlier, slow attempt got in while we were waiting for motion
   const token = makeToken();
+  link?.close(); // still looking for an earlier code in the background
   link = connect(
     code,
     { token, name },
     onServerMsg,
     () => render(),
   );
+  clearTimeout(joinTimer);
+  joinTimer = setTimeout(() => cantFindRoom(code), JOIN_TIMEOUT_MS);
+  render();
+}
+
+/**
+ * No welcome in time: make the code editable and say so. The link keeps looking in the background,
+ * so a TV that was just slow still lets this phone in; tapping start again dials the (edited) code.
+ */
+function cantFindRoom(code: string): void {
+  if (welcomed) return;
+  linkCode = '';
+  els.roomChip.hidden = true;
+  els.codeInput.hidden = false;
+  els.codeInput.value = code;
+  started = false;
+  setBusy(false);
+  showJoinError(`Can't find room ${code} — check the code on the TV`);
   render();
 }
 
 function onServerMsg(m: ServerMsg): void {
   switch (m.t) {
     case 'welcome':
+      clearTimeout(joinTimer);
       welcomed = true;
+      started = true; // also when it arrives after the "can't find room" message
+      showJoinError('');
       setKartColor(m.color);
       render();
       break;
@@ -351,6 +384,7 @@ function onServerMsg(m: ServerMsg): void {
       if (m.kind === 'hit') navigator.vibrate?.(200);
       break;
     case 'lobbyFull':
+      clearTimeout(joinTimer);
       link?.close();
       link = null;
       started = false;
