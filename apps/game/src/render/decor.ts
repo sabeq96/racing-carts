@@ -7,7 +7,7 @@ import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
 import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import type { Track } from '../track/track';
-import { ENV, SUN_DIR, cloudMaterial, cloudShadowMaterial } from './shaders';
+import { ENV, SUN_DIR, WIND_X, WIND_Z, cloudMaterial, cloudShadowMaterial } from './shaders';
 
 /** Small deterministic PRNG (mulberry32), so the world is the same every boot. */
 export function seeded(seed: number): () => number {
@@ -30,9 +30,7 @@ const CLOUD_MARGIN = 70;
 /** Cloud heights (m): low enough to be seen from the steep camera at every zoom, like a diorama. */
 const CLOUD_MIN_Y = 10;
 const CLOUD_MAX_Y = 14;
-/** Wind (unit xz direction) and drift speed (m/s). */
-const WIND_X = 0.96;
-const WIND_Z = 0.28;
+/** Drift speed along the wind (m/s). */
 const WIND_SPEED = 1.1;
 /** Near the wrap edges a cloud shrinks away (and grows back on the other side) over this many metres. */
 const CLOUD_EDGE = 30;

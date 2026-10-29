@@ -5,6 +5,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import type { Material } from '@babylonjs/core/Materials/material';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder';
 import { CreateRibbon } from '@babylonjs/core/Meshes/Builders/ribbonBuilder';
@@ -17,7 +18,8 @@ import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import type { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 import { PAD_LENGTH, PAD_WIDTH } from '../race/boostPads';
 import type { Track } from '../track/track';
-import { ENV, HORIZON, SUN_DIR, skyMaterial } from './shaders';
+import type { Texture } from '@babylonjs/core/Materials/Textures/texture';
+import { ENV, HORIZON, SUN_DIR, grassMaterial, noiseTexture, roadMaterial, skyMaterial, toonMaterial } from './shaders';
 import { buildClouds, seeded } from './decor';
 
 export const PALETTE = {
@@ -123,7 +125,7 @@ function edgePath(track: Track, lateral: number, y: number): Vector3[] {
   });
 }
 
-function buildGround(scene: Scene, track: Track): void {
+function buildGround(scene: Scene, track: Track, noise: Texture): void {
   const b = track.bounds;
   const ground = CreateGround(
     'ground',
@@ -131,7 +133,7 @@ function buildGround(scene: Scene, track: Track): void {
     scene,
   );
   ground.position.set((b.minX + b.maxX) / 2, 0, (b.minZ + b.maxZ) / 2);
-  const m = matte('grass', PALETTE.grass, scene);
+  const m = grassMaterial(PALETTE.grass, noise, scene);
   ground.material = m;
   settle(ground);
   // The zoomed-out camera sees far past the play area; a wide meadow just below it in the same
@@ -141,10 +143,9 @@ function buildGround(scene: Scene, track: Track): void {
   meadow.position.set(ground.position.x, -0.05, ground.position.z);
   meadow.material = m;
   settle(meadow);
-  m.freeze();
 }
 
-function buildRoad(scene: Scene, track: Track): void {
+function buildRoad(scene: Scene, track: Track, noise: Texture): void {
   const half = track.width / 2;
   // [left, right] gives upward-facing normals.
   const road = CreateRibbon(
@@ -152,10 +153,9 @@ function buildRoad(scene: Scene, track: Track): void {
     { pathArray: [edgePath(track, -half, 0.02), edgePath(track, half, 0.02)], closePath: true },
     scene,
   );
-  const roadMat = matte('road', PALETTE.road, scene);
+  const roadMat = roadMaterial(PALETTE.road, noise, scene);
   roadMat.zOffset = -1;
   road.material = roadMat;
-  roadMat.freeze();
   settle(road);
 
   // Soft dashed centre line: cheap, and it makes speed readable on the long straights.
@@ -340,16 +340,16 @@ function buildScenery(scene: Scene, track: Track): void {
     shadows.push(shadow);
   }
 
-  const set = (meshes: Mesh[], name: string, mat: StandardMaterial) => {
+  const set = (meshes: Mesh[], name: string, mat: Material) => {
     const m = merge(meshes, name);
     if (m) m.material = mat;
-    mat.freeze();
   };
-  set(trunks, 'trunks', matte('trunk', PALETTE.trunk, scene));
-  set(canopies, 'canopies', matte('canopy', PALETTE.canopy, scene));
-  set(rocks, 'rocks', matte('rock', PALETTE.rock, scene));
+  set(trunks, 'trunks', toonMaterial('trunk', PALETTE.trunk, scene, 0.08));
+  set(canopies, 'canopies', toonMaterial('canopy', PALETTE.canopy, scene, 0.12));
+  set(rocks, 'rocks', toonMaterial('rock', PALETTE.rock, scene, 0.1));
   const shadowMat = blobShadowMaterial(scene);
   set(shadows, 'sceneryShadows', shadowMat);
+  shadowMat.freeze();
 }
 
 /** A large dome around the camera with the gradient sky; created first, so it is drawn first. */
@@ -397,8 +397,9 @@ export function createScene(engine: Engine, track: Track): Scene {
   });
 
   buildSky(scene);
-  buildGround(scene, track);
-  buildRoad(scene, track);
+  const noise = noiseTexture(scene);
+  buildGround(scene, track, noise);
+  buildRoad(scene, track, noise);
   buildBoostPads(scene, track);
   buildWalls(scene, track);
   buildScenery(scene, track);

@@ -11,7 +11,9 @@ import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
 import { CreateDisc } from '@babylonjs/core/Meshes/Builders/discBuilder';
 import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';
 import { effectLeft, type Kart } from '../kart/kart';
-import { blobShadowMaterial, matte } from './scene';
+import { blobShadowMaterial } from './scene';
+import { toonMaterial } from './shaders';
+import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
 
 /** Maximum body roll (radians) and how much sideways slip produces it. */
 const MAX_LEAN = 0.16;
@@ -39,6 +41,8 @@ const STREAK_RATE = 2.6;
 const STREAK_FRONT = 1.6;
 const STREAK_BACK = -2.8;
 const STREAK_ALPHA = 0.8;
+/** Warm rim light on kart bodies, so they pop off the grass and road from the couch. */
+const KART_RIM = 0.25;
 
 interface View {
   root: TransformNode;
@@ -68,7 +72,8 @@ interface Template {
 export class KartViews {
   private views = new Map<number, View>();
   private template: Template;
-  private bodyMats = new Map<string, StandardMaterial>();
+  /** One toon material per kart colour, shared by every clone in that colour. */
+  private bodyMats = new Map<string, ShaderMaterial>();
   private frame = 0;
   private stale: number[] = [];
   /** Seconds of rendering, for the bubble wobble and flame flicker. */
@@ -117,14 +122,14 @@ export class KartViews {
     const streak = CreateBox('kartStreak', { width: 0.16, height: 0.05, depth: STREAK_LEN }, scene);
     streak.material = flameMaterial('kartStreak', '#FFFFFF', STREAK_ALPHA, scene);
 
-    const dark = matte('kartDark', '#5B4A44', scene);
-    const cream = matte('kartCream', '#FFF3E0', scene);
+    const dark = toonMaterial('kartDark', '#5B4A44', scene, 0.12);
+    const cream = toonMaterial('kartCream', '#FFF3E0', scene, KART_RIM);
     nose.material = dark;
     head.material = cream;
     wheel.material = dark;
     const shadowMat = blobShadowMaterial(scene);
     shadow.material = shadowMat;
-    for (const m of [dark, cream, shadowMat]) m.freeze();
+    shadowMat.freeze();
 
     this.template = { body, nose, head, wheel, shadow, bubble, flame, streak };
     for (const mesh of Object.values(this.template)) {
@@ -133,11 +138,10 @@ export class KartViews {
     }
   }
 
-  private bodyMaterial(color: string): StandardMaterial {
+  private bodyMaterial(color: string): ShaderMaterial {
     let m = this.bodyMats.get(color);
     if (!m) {
-      m = matte('kart' + color, color, this.scene);
-      m.freeze();
+      m = toonMaterial('kart' + color, color, this.scene, KART_RIM);
       this.bodyMats.set(color, m);
     }
     return m;

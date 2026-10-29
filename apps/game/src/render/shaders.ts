@@ -2,6 +2,8 @@ import type { Scene } from '@babylonjs/core/scene';
 import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
 import { Vector3, Vector4 } from '@babylonjs/core/Maths/math.vector';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture';
+import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 
 /*
  * Small hand-written GLSL ES 1.00 shaders (WebGL1-safe; Babylon upgrades them for WebGL2). They share
@@ -11,6 +13,9 @@ import { Color3 } from '@babylonjs/core/Maths/math.color';
 /** Direction towards the sun: high, behind the camera's right shoulder, so fronts of things are lit. */
 export const SUN_DIR = new Vector3(0.5, 0.8, -0.6).normalize();
 export const HORIZON = '#FFD9B8';
+/** Wind: unit direction on the ground (x, z). Clouds drift and trees sway along it. */
+export const WIND_X = 0.96;
+export const WIND_Z = 0.28;
 export const ZENITH = '#9FD3FF';
 
 /**
@@ -61,6 +66,8 @@ varying float vDepth;
 const vec3 SUN = ${vec3(SUN_DIR)};
 const vec3 HORIZON = ${glsl(HORIZON)};
 const vec3 ZENITH = ${glsl(ZENITH)};
+/** The warm tint of sunlit, up-facing surfaces. */
+const vec3 SUNLIT = vec3(1.03, 1.0, 0.95);
 vec3 fog(vec3 c) {
   float f = clamp((vFogInfos.z - vDepth) / max(vFogInfos.z - vFogInfos.y, 0.001), 0.0, 1.0);
   return mix(vFogColor, c, f);
@@ -170,5 +177,173 @@ void main() {
     { attributes: ['uv'], alpha: true },
   );
   m.disableDepthWrite = true;
+  return m;
+}
+
+/**
+ * Soft toon shading: three gentle bands (deep shade, mid, warm sunlit), and a subtle warm rim
+ * that lifts silhouettes off the grass. Up-facing surfaces show `hex` itself. Vertex colours, if the
+ * mesh has them, tint it.
+ */
+export function toonMaterial(name: string, hex: string, scene: Scene, rim = 0.18): ShaderMaterial {
+  const m = shader(
+    name,
+    scene,
+    `attribute vec3 normal;
+#ifdef VERTEXCOLOR
+attribute vec4 color;
+varying vec3 vColor;
+#endif
+varying vec3 vNormalW;
+void main() {
+  mat4 w = worldMatrix();
+  vec4 p = w * vec4(position, 1.0);
+#ifdef VERTEXCOLOR
+  vColor = color.rgb;
+#endif
+  vPosW = p.xyz;
+  vNormalW = normalize((w * vec4(normal, 0.0)).xyz);
+  vDepth = (view * p).z;
+  gl_Position = viewProjection * p;
+}`,
+    `uniform vec3 color;
+uniform float rim;
+#ifdef VERTEXCOLOR
+varying vec3 vColor;
+#endif
+varying vec3 vNormalW;
+void main() {
+  vec3 n = normalize(vNormalW);
+  float hl = dot(n, SUN) * 0.5 + 0.5;
+  vec3 base = color;
+#ifdef VERTEXCOLOR
+  base *= vColor;
+#endif
+  // Shaded bands deepen towards a richer version of the colour (painterly, keeps it saturated).
+  vec3 shade = base * mix(vec3(0.7, 0.7, 0.84), base, 0.35);
+  vec3 mid = base * mix(vec3(0.88, 0.88, 0.95), base, 0.15);
+  vec3 c = mix(shade, mid, smoothstep(0.4, 0.47, hl));
+  c = mix(c, base * SUNLIT, smoothstep(0.7, 0.76, hl));
+  float r = 1.0 - max(dot(n, normalize(cameraPosition - vPosW)), 0.0);
+  r *= r;
+  c = mix(c, vec3(1.0, 0.96, 0.88), r * r * rim);
+  gl_FragColor = vec4(fog(c), 1.0);
+}`,
+    { attributes: ['normal'], uniforms: ['color', 'rim'] },
+  );
+  m.setColor3('color', Color3.FromHexString(hex));
+  m.setFloat('rim', rim);
+  return m;
+}
+
+/**
+ * A 64 × 64 tiling texture of smooth random values, four independent channels: the grass, road and
+ * pond read their noise from it (one cheap filtered fetch each, instead of maths per pixel).
+ */
+export function noiseTexture(scene: Scene): RawTexture {
+  const N = 64;
+  let a = new Float32Array(N * N * 4);
+  let seed = 12345;
+  for (let i = 0; i < a.length; i++) {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    a[i] = (seed >>> 8) / 16777216;
+  }
+  // Two wrapping 3 × 3 blurs soften the blocks into blotches.
+  for (let pass = 0; pass < 2; pass++) {
+    const b = new Float32Array(a.length);
+    for (let y = 0; y < N; y++)
+      for (let x = 0; x < N; x++)
+        for (let c = 0; c < 4; c++) {
+          let sum = 0;
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) sum += a[((((y + dy + N) % N) * N + ((x + dx + N) % N)) * 4) + c];
+          b[(y * N + x) * 4 + c] = sum / 9;
+        }
+    a = b;
+  }
+  // Stretch each channel back to the full 0..1 range.
+  const bytes = new Uint8Array(a.length);
+  for (let c = 0; c < 4; c++) {
+    let lo = 1, hi = 0;
+    for (let i = c; i < a.length; i += 4) {
+      lo = Math.min(lo, a[i]);
+      hi = Math.max(hi, a[i]);
+    }
+    for (let i = c; i < a.length; i += 4) bytes[i] = Math.round(((a[i] - lo) / (hi - lo)) * 255);
+  }
+  const t = RawTexture.CreateRGBATexture(bytes, N, N, scene, true, false, Texture.TRILINEAR_SAMPLINGMODE);
+  t.wrapU = Texture.WRAP_ADDRESSMODE;
+  t.wrapV = Texture.WRAP_ADDRESSMODE;
+  return t;
+}
+
+const FLAT_VERTEX = `attribute vec2 uv;
+varying vec2 vUv;
+void main() {
+  vec4 p = worldMatrix() * vec4(position, 1.0);
+  vPosW = p.xyz;
+  vUv = uv;
+  vDepth = (view * p).z;
+  gl_Position = viewProjection * p;
+}`;
+
+/**
+ * Grass: big soft patches of colour (some a touch sunnier) and very faint mown stripes, 6 m wide,
+ * running along world x. Flat and up-facing, so it shows `hex` lit by the sun.
+ */
+export function grassMaterial(hex: string, noise: Texture, scene: Scene): ShaderMaterial {
+  const m = shader(
+    'grass',
+    scene,
+    FLAT_VERTEX,
+    `uniform sampler2D noise;
+uniform vec3 color;
+varying vec2 vUv;
+void main() {
+  vec2 p = vPosW.xz;
+  float big = texture2D(noise, p / 420.0).r;
+  float mid = texture2D(noise, p / 90.0).g;
+  vec3 c = color * SUNLIT * (0.96 + 0.06 * big + 0.03 * mid);
+  c = mix(c, c * vec3(1.04, 1.02, 0.9), smoothstep(0.6, 0.9, big) * 0.4);
+  // Mown stripes, only up close: far away they would shimmer into lines.
+  float stripes = 1.0 - smoothstep(40.0, 90.0, vDepth);
+  c *= 1.0 + 0.016 * stripes * (smoothstep(-0.3, 0.3, sin(p.y * 0.5236)) - 0.5);
+  gl_FragColor = vec4(fog(c), 1.0);
+}`,
+    { attributes: ['uv'], uniforms: ['color'], samplers: ['noise'] },
+  );
+  m.setColor3('color', Color3.FromHexString(hex));
+  m.setTexture('noise', noise);
+  return m;
+}
+
+/**
+ * Road: fine speckle, slightly darker edges (the ribbon's uv.y runs 0 → 1 across the road) and two
+ * faint tyre-worn lanes where the karts drive.
+ */
+export function roadMaterial(hex: string, noise: Texture, scene: Scene): ShaderMaterial {
+  const m = shader(
+    'road',
+    scene,
+    FLAT_VERTEX,
+    `uniform sampler2D noise;
+uniform vec3 color;
+varying vec2 vUv;
+void main() {
+  vec2 p = vPosW.xz;
+  float e = abs(vUv.y - 0.5) * 2.0;
+  float n = texture2D(noise, p / 2.5).b;
+  float big = texture2D(noise, p / 200.0).a;
+  vec3 c = color * SUNLIT * (0.97 + 0.05 * big);
+  c *= 1.0 + 0.035 * smoothstep(0.68, 0.85, n) - 0.03 * smoothstep(0.32, 0.15, n);
+  c *= 1.0 - 0.1 * smoothstep(0.75, 1.0, e);
+  float lane = (e - 0.5) / 0.09;
+  c *= 1.0 - 0.035 * exp(-lane * lane);
+  gl_FragColor = vec4(fog(c), 1.0);
+}`,
+    { attributes: ['uv'], uniforms: ['color'], samplers: ['noise'] },
+  );
+  m.setColor3('color', Color3.FromHexString(hex));
+  m.setTexture('noise', noise);
   return m;
 }
