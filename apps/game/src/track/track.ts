@@ -13,6 +13,8 @@ export interface Track {
   project(p: Vec2, hintIndex?: number): { s: number; lateral: number; index: number };
   grid: { pos: Vec2; heading: number; s: number }[];
   itemBoxes: Vec2[];
+  /** Boost pads: `s` in metres, `pos` is the pad centre, `heading` the road direction there. */
+  boostPads: { s: number; lateral: number; pos: Vec2; heading: number }[];
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
 }
 
@@ -133,6 +135,11 @@ export function buildTrack(def: TrackDef): Track {
   for (const row of def.itemBoxRows)
     for (const lat of def.itemBoxLaterals) itemBoxes.push(pointAt(row * length, lat));
 
+  const boostPads = (def.boostPads ?? []).map(({ s: f, lateral }) => {
+    const s = f * length;
+    return { s, lateral, pos: pointAt(s, lateral), heading: headingAt(s) };
+  });
+
   const margin = width / 2;
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const p of points) {
@@ -141,5 +148,5 @@ export function buildTrack(def: TrackDef): Track {
   }
   const bounds = { minX: minX - margin, maxX: maxX + margin, minZ: minZ - margin, maxZ: maxZ + margin };
 
-  return { points, length, width, pointAt, headingAt, project, grid, itemBoxes, bounds };
+  return { points, length, width, pointAt, headingAt, project, grid, itemBoxes, boostPads, bounds };
 }

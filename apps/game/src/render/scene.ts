@@ -13,6 +13,8 @@ import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder'
 import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
 import { CreateIcoSphere } from '@babylonjs/core/Meshes/Builders/icoSphereBuilder';
 import { CreateDisc } from '@babylonjs/core/Meshes/Builders/discBuilder';
+import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
+import { PAD_LENGTH, PAD_WIDTH } from '../race/boostPads';
 import type { Track } from '../track/track';
 
 export const PALETTE = {
@@ -27,6 +29,8 @@ export const PALETTE = {
   trunk: '#C9A27E',
   rock: '#D9CFC1',
   shadow: '#4A3A30',
+  padBase: '#FFEFC2',
+  padArrow: '#FFC24D',
 };
 
 const WALL_RADIUS = 0.6;
@@ -199,6 +203,77 @@ function buildRoad(scene: Scene, track: Track): void {
   settle(stripe);
 }
 
+/** Chevron arrows per pad: centres along the pad (m), half-width, how far the arms sweep back, stroke depth. */
+const CHEVRONS = [-0.75, 0.45, 1.65];
+const CHEVRON_HALF = 1.45;
+const CHEVRON_SWEEP = 0.95;
+const CHEVRON_DEPTH = 0.55;
+/** The pale pad under the arrows is this much smaller than the contact rectangle, with clipped corners. */
+const PAD_INSET = 0.15;
+const PAD_CORNER = 0.6;
+
+/** Soft unlit glow: the pads read as warm light on the road, not paint. */
+function glow(name: string, hex: string, scene: Scene): StandardMaterial {
+  const m = new StandardMaterial(name, scene);
+  m.disableLighting = true;
+  m.emissiveColor = Color3.FromHexString(hex);
+  m.diffuseColor = Color3.Black();
+  m.specularColor = Color3.Black();
+  m.backFaceCulling = false;
+  return m;
+}
+
+/** Flat polygons (fans from their first point) lying at height `y`, as one static mesh. */
+function flatMesh(name: string, polygons: number[][][], y: number, scene: Scene): Mesh {
+  const positions: number[] = [], indices: number[] = [], normals: number[] = [];
+  for (const poly of polygons) {
+    const base = positions.length / 3;
+    for (const [x, z] of poly) {
+      positions.push(x, y, z);
+      normals.push(0, 1, 0);
+    }
+    for (let i = 1; i + 1 < poly.length; i++) indices.push(base, base + i, base + i + 1);
+  }
+  const data = new VertexData();
+  data.positions = positions;
+  data.indices = indices;
+  data.normals = normals;
+  const mesh = new Mesh(name, scene);
+  data.applyToMesh(mesh);
+  settle(mesh);
+  return mesh;
+}
+
+/** Boost pads: a pale butter pad with three warm-yellow chevrons pointing down the road. */
+function buildBoostPads(scene: Scene, track: Track): void {
+  if (track.boostPads.length === 0) return;
+  const bases: number[][][] = [], arrows: number[][][] = [];
+  for (const pad of track.boostPads) {
+    const fx = Math.sin(pad.heading), fz = Math.cos(pad.heading);
+    const rx = Math.cos(pad.heading), rz = -Math.sin(pad.heading);
+    // (along, across) in the pad's frame → world (x, z).
+    const at = (a: number, l: number): number[] => [pad.pos.x + fx * a + rx * l, pad.pos.z + fz * a + rz * l];
+    const ha = PAD_LENGTH / 2 - PAD_INSET, hl = PAD_WIDTH / 2 - PAD_INSET, c = PAD_CORNER;
+    bases.push([at(0, 0), at(ha, -hl + c), at(ha, hl - c), at(ha - c, hl), at(-ha + c, hl), at(-ha, hl - c),
+      at(-ha, -hl + c), at(-ha + c, -hl), at(ha - c, -hl), at(ha, -hl + c)]);
+    for (const mid of CHEVRONS) {
+      const front = mid + CHEVRON_DEPTH / 2, back = mid - CHEVRON_DEPTH / 2;
+      const arm = (tip: number, side: number) => at(tip - CHEVRON_SWEEP, side * CHEVRON_HALF);
+      // Two quads per chevron (left arm, right arm), sharing the tip edge.
+      arrows.push([at(front, 0), arm(front, 1), arm(back, 1), at(back, 0)]);
+      arrows.push([at(front, 0), at(back, 0), arm(back, -1), arm(front, -1)]);
+    }
+  }
+  const baseMat = glow('padBase', PALETTE.padBase, scene);
+  baseMat.zOffset = -3;
+  flatMesh('boostPadBases', bases, 0.045, scene).material = baseMat;
+  baseMat.freeze();
+  const arrowMat = glow('padArrow', PALETTE.padArrow, scene);
+  arrowMat.zOffset = -4;
+  flatMesh('boostPadArrows', arrows, 0.05, scene).material = arrowMat;
+  arrowMat.freeze();
+}
+
 /** Candy-striped tube walls just outside both road edges, merged into one mesh per colour. */
 function buildWalls(scene: Scene, track: Track): void {
   const lateral = track.width / 2 + WALL_RADIUS * 0.8;
@@ -299,6 +374,7 @@ export function createScene(engine: Engine, track: Track): Scene {
 
   buildGround(scene, track);
   buildRoad(scene, track);
+  buildBoostPads(scene, track);
   buildWalls(scene, track);
   buildScenery(scene, track);
   return scene;

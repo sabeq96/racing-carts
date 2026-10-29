@@ -188,3 +188,19 @@ test('setupKarts forgets undelivered wall hits and bumps', () => {
   g.setupKarts(2);
   expect(g.drainKartBumps()).toEqual([]);
 });
+
+test('a kart driving over a boost pad in a race step gets the boost and its sound', () => {
+  const g = new Game(track);
+  g.setupKarts(1);
+  const d = human(() => NEUTRAL_INPUT);
+  toRacing(g, d);
+  g.world.drainSfx();
+  const pad = track.boostPads[0];
+  const k = g.karts[0];
+  k.pos = { x: pad.pos.x, z: pad.pos.z };
+  k.heading = pad.heading;
+  k.trackIndex = track.project(k.pos).index;
+  g.step(1 / 60, d);
+  expect(g.world.hasEffect(k, 'boost')).toBe(true);
+  expect(g.world.drainSfx()).toContain('boost');
+});

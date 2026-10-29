@@ -1,6 +1,7 @@
 import { KART_COLORS, NEUTRAL_INPUT, type InputSnapshot } from '@rc/shared';
 import { createKart, resolveKartCollisions, stepKart, type Kart } from './kart/kart';
 import { ItemBoxes } from './powerups/itemBoxes';
+import { BoostPads } from './race/boostPads';
 import { handleItemInput } from './powerups/useItem';
 import { createWorld, type World } from './powerups/world';
 import { Race, type RaceEvent } from './race/race';
@@ -23,6 +24,7 @@ export class Game {
   /** Powerup entities, effects, sounds and hits for the current karts (replaced by `setupKarts`). */
   world: World;
   itemBoxes: ItemBoxes;
+  boostPads: BoostPads;
   /** Human kart ids as of the latest step; reused so the render loop allocates nothing. */
   private humanIds: number[] = [];
   private readonly isHuman = (id: number): boolean => this.humanIds.indexOf(id) >= 0;
@@ -38,6 +40,7 @@ export class Game {
     this.track = track;
     this.world = createWorld(this.karts, track);
     this.itemBoxes = new ItemBoxes(track);
+    this.boostPads = new BoostPads(track);
   }
 
   /**
@@ -51,14 +54,16 @@ export class Game {
     );
     this.world = createWorld(this.karts, this.track);
     this.itemBoxes = new ItemBoxes(this.track);
+    this.boostPads = new BoostPads(this.track);
     this.itemGot.length = 0;
     this.wallHits.length = 0;
     this.bumps.length = 0;
   }
 
   /**
-   * One fixed step: inputs → item presses → physics → kart collisions → item boxes → powerup world
-   * (entities, effects) → race (progress, laps, phases). Inputs, items included, only count while racing.
+   * One fixed step: inputs → item presses → physics → kart collisions → item boxes → boost pads →
+   * powerup world (entities, effects) → race (progress, laps, phases). Inputs, items included, only count
+   * while racing.
    */
   step(dt: number, drivers: (kartId: number) => Driver): RaceEvent[] {
     const racing = this.race.phase === 'racing';
@@ -78,6 +83,7 @@ export class Game {
     for (const [a, b] of resolveKartCollisions(karts)) this.bumps.push(a, b);
     const got = this.itemBoxes.update(dt, karts, this.world, this.rand);
     for (const id of got) this.itemGot.push(id);
+    this.boostPads.update(dt, karts, this.world);
     this.world.step(dt);
     return this.race.update(dt, karts, this.track, this.isHuman);
   }

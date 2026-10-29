@@ -6,6 +6,8 @@ export interface TrackDef {
   itemBoxRows: number[];
   /** Lateral offsets of the boxes in each row (positive = right). */
   itemBoxLaterals: number[];
+  /** Boost pads: `s` as a fraction of the lap, `lateral` in metres (positive = right). */
+  boostPads?: { s: number; lateral: number }[];
 }
 
 export const TRACK_V1: TrackDef = {
@@ -16,4 +18,11 @@ export const TRACK_V1: TrackDef = {
   width: 12,
   itemBoxRows: [0.3, 0.7],
   itemBoxLaterals: [-4.5, -1.5, 1.5, 4.5],
+  // Start straight past the grid (centre), the right hairpin's exit and the last corner's exit (both on
+  // the outside of the exit, where a wide line ends up).
+  boostPads: [
+    { s: 0.08, lateral: 0 },
+    { s: 0.655, lateral: -2.5 },
+    { s: 0.945, lateral: -2.5 },
+  ],
 };
