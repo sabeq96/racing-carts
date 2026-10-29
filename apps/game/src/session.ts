@@ -314,6 +314,9 @@ export class Session {
       this.lastSent.delete(t);
       this.humanDrivers.delete(t);
       this.inputs.delete(t);
+      // Their kart is no longer theirs: if they come back during these results, they get a new slot whose
+      // kart someone else raced.
+      this.resultTokens?.delete(t);
     }
     return gone.length;
   }

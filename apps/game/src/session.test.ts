@@ -431,6 +431,25 @@ test('a full room during results makes space by dropping players who left', () =
   expect(registry.byToken('d')).toBeUndefined();
 });
 
+test('results: a phone evicted from a full room and back again gets position 0, not another kart\'s place', () => {
+  const { game, registry, session } = setup(0);
+  for (const t of ['a', 'b', 'c', 'd', 'e', 'f']) session.onHello(t, t.toUpperCase());
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  game.race.phase = 'results';
+  session.syncPhones(); // everyone was connected when the race ended
+  session.onDisconnect('d');
+  session.onDisconnect('e');
+  expect(session.onHello('late', 'Lou')).toBeNull(); // full: d and e are evicted, Lou takes slot 3
+  expect(registry.byToken('d')).toBeUndefined();
+  expect(session.onHello('d', 'Dee')).toBeNull(); // back, now in e's old slot 4
+  expect(registry.byToken('d')?.slot).toBe(4);
+  session.syncPhones();
+  expect(lastState('d')).toMatchObject({ phase: 'results', position: 0 });
+  expect(lastState('late')).toMatchObject({ phase: 'results', position: 0 });
+  expect(lastState('a')?.position).toBeGreaterThan(0);
+});
+
 test('results: a phone that was not connected when the race ended gets position 0, not a bot\'s place', () => {
   const { game, session } = setup(3);
   session.onHello('a', 'Ada');
