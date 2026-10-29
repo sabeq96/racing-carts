@@ -55,9 +55,13 @@ export function createKeyboard(target: Window = window): { input(): InputSnapsho
       down.delete(key.toUpperCase());
     }
   });
-  // Keys released while the window is unfocused or hidden never send keyup.
-  target.addEventListener('blur', () => down.clear());
-  target.document.addEventListener('visibilitychange', () => down.clear());
+  // Keys released while the window is unfocused or hidden never send keyup; a pending tap is stale too.
+  const reset = (): void => {
+    down.clear();
+    itemLatch = false;
+  };
+  target.addEventListener('blur', reset);
+  target.document.addEventListener('visibilitychange', reset);
 
   return {
     /** Called once per fixed step. `item` is held, or pressed at any moment since the last call. */

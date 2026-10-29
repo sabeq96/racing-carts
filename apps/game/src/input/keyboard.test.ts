@@ -47,3 +47,14 @@ test('driving keys are plain levels', () => {
   fire('keyup', 'ArrowUp');
   expect(kb.input().gas).toBe(false);
 });
+
+test('blur or hiding the page drops a pending item tap', () => {
+  for (const type of ['blur', 'visibilitychange']) {
+    const { target, fire } = fakeWindow();
+    const kb = createKeyboard(target);
+    fire('keydown', ' ');
+    fire('keyup', ' ');
+    fire(type, '');
+    expect(kb.input().item).toBe(false);
+  }
+});
