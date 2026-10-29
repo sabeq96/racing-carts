@@ -344,15 +344,15 @@ body[data-screen="drive"] #drive {
   box-shadow: 0 1px 0 #e0645a;
   transform: translateY(6px);
 }
-/* Drift charge: warm yellow at level 1, pink-orange at level 2 (let go of BRAKE for a little boost). */
+/* Drift charge: warm peach-yellow (apricot, unlike the butter ITEM pad) at level 1, pink-orange at level 2 (let go of BRAKE for a little boost). */
 .pad-brake.glow1,
 .pad-brake.glow2 {
   transition: background-color 0.15s;
 }
 .pad-brake.glow1 {
-  background: #ffe38a;
-  color: var(--butter-ink);
-  box-shadow: 0 1px 0 #e6b92e, 0 0 0 6px rgba(255, 227, 138, 0.55), 0 0 30px 10px rgba(255, 217, 102, 0.75);
+  background: #ffc27a;
+  color: #6b3a00;
+  box-shadow: 0 1px 0 #eb9a48, 0 0 0 6px rgba(255, 194, 122, 0.55), 0 0 30px 10px rgba(255, 176, 92, 0.7);
 }
 .pad-brake.glow2 {
   background: #ffa98f;

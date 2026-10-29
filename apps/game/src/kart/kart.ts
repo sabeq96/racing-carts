@@ -13,7 +13,8 @@ import {
   DRIFT_GRIP,
   DRIFT_START_SPEED,
   DRIFT_START_STEER,
-  DRIFT_STEER,
+  DRIFT_TURN_MAX,
+  DRIFT_TURN_MIN,
   GRIP,
   KART_RADIUS,
   MAX_SPEED,
@@ -54,6 +55,8 @@ export interface Kart {
   finishedAt: number | null;
   /** Power slide: BRAKE + steer at speed. `charge` is seconds drifted (pays a mini-turbo on release). */
   drift: { active: boolean; charge: number };
+  /** BRAKE was still held when a drift ended: it is ignored until let go (no hard stop after a slide). */
+  brakeLatched: boolean;
   /** Seconds since the kart last touched a wall (catch-up waits CATCHUP_WALL_PAUSE after a touch). */
   sinceWall: number;
   /** Seconds spent in another kart's slipstream (see `stepSlipstream`); render shows streaks above 0.2. */
@@ -79,6 +82,7 @@ export function createKart(id: number, color: string, slot: Track['grid'][number
     lateral: pr.lateral,
     finishedAt: null,
     drift: { active: false, charge: 0 },
+    brakeLatched: false,
     sinceWall: CATCHUP_WALL_PAUSE,
     draft: 0,
   };
@@ -110,6 +114,15 @@ export function driftLevel(k: Kart): 0 | 1 | 2 {
   return k.drift.charge >= MT2 ? 2 : k.drift.charge >= MT1 ? 1 : 0;
 }
 
+/**
+ * Turn rate while drifting, in units of STEER_RATE: DRIFT_TURN_MIN up to |steer| = DRIFT_START_STEER, then
+ * rising linearly to DRIFT_TURN_MAX at full lock, with the sign of `steer`.
+ */
+export function driftTurn(steer: number): number {
+  const t = Math.max(0, Math.min(1, (Math.abs(steer) - DRIFT_START_STEER) / (1 - DRIFT_START_STEER)));
+  return Math.sign(steer) * (DRIFT_TURN_MIN + (DRIFT_TURN_MAX - DRIFT_TURN_MIN) * t);
+}
+
 /** Ends a drift: a charged one pays its mini-turbo as a boost (unless `cancel`), and the charge is gone. */
 function endDrift(k: Kart, cancel: boolean): void {
   const d = k.drift;
@@ -119,6 +132,7 @@ function endDrift(k: Kart, cancel: boolean): void {
   }
   d.active = false;
   d.charge = 0;
+  k.brakeLatched = true; // cleared on the first step BRAKE is up
 }
 
 /** Move `v` toward `target` by at most `step` (never overshooting). */
@@ -138,6 +152,8 @@ export function stepKart(
   topSpeedScale = 1,
 ): { hitWall: boolean } {
   const drift = k.drift;
+  if (!input.brake) k.brakeLatched = false;
+  const brake = input.brake && !k.brakeLatched;
   if (k.spin > 0) {
     if (drift.active) endDrift(k, true); // a spin-out loses the drift and its charge
     k.spin = Math.max(0, k.spin - dt);
@@ -147,8 +163,8 @@ export function stepKart(
     const steer = Math.max(-1, Math.min(1, input.steer));
     const turn = Math.abs(steer);
     if (drift.active) {
-      if (!input.brake || turn <= DRIFT_END_STEER || k.speed < DRIFT_END_SPEED) endDrift(k, false);
-    } else if (input.brake && turn > DRIFT_START_STEER && k.speed > DRIFT_START_SPEED) {
+      if (!brake || turn <= DRIFT_END_STEER || k.speed < DRIFT_END_SPEED) endDrift(k, false);
+    } else if (brake && turn > DRIFT_START_STEER && k.speed > DRIFT_START_SPEED) {
       drift.active = true;
       drift.charge = 0;
     }
@@ -159,7 +175,7 @@ export function stepKart(
       // A drift holds its speed: brake only means "slide", with a mild drag (or the usual ease-off above max).
       k.speed = k.speed > max ? Math.max(max, k.speed - ACCEL * dt) : k.speed - DRIFT_DRAG * dt;
       drift.charge += dt;
-    } else if (input.brake) {
+    } else if (brake && !k.brakeLatched) {
       // Brake wins over gas, also above top speed. Hard braking while rolling forward, gentler reverse from rest.
       k.speed = Math.max(-REVERSE_MAX, k.speed - (k.speed > 0 ? BRAKE_DECEL : ACCEL) * dt);
     } else if (k.speed > max) {
@@ -169,8 +185,8 @@ export function stepKart(
     } else {
       k.speed = approach(k.speed, 0, COAST_DECEL * dt);
     }
-    const rate = STEER_RATE * (drift.active ? DRIFT_STEER : 1);
-    k.heading += steer * rate * Math.min(1, Math.abs(k.speed) / 6) * Math.sign(k.speed) * dt;
+    const turnIn = drift.active ? driftTurn(steer) : steer;
+    k.heading += turnIn * STEER_RATE * Math.min(1, Math.abs(k.speed) / 6) * Math.sign(k.speed) * dt;
   }
 
   // Grip: velocity chases the heading direction (loosely while drifting, so the kart slides).

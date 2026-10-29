@@ -57,10 +57,6 @@ function runGame(root: HTMLElement): void {
   const antialias = aaParam === '1' ? true : aaParam === '0' ? false : !onTv;
   // DEV ONLY (screenshots): `?keyboard=1&give=<item id>` hands the keyboard kart that item at GO.
   const giveItem = keyboardOn ? params.get('give') : null;
-  // DEV ONLY (screenshots): `?keyboard=1&steer=0.4` softens the all-or-nothing arrow keys to a gentle phone
-  // tilt, so a keyboard drift can be held through a corner.
-  const steerParam = Number.parseFloat(params.get('steer') ?? '');
-  const keyboardSteer = Number.isFinite(steerParam) ? Math.max(0, Math.min(1, steerParam)) : 1;
 
   let engine: Engine;
   try {
@@ -83,15 +79,7 @@ function runGame(root: HTMLElement): void {
   let net: NetHost | null = null;
   const session = new Session(game, registry, (token, msg) => net?.send(token, msg), {
     maxBots,
-    keyboard: keyboard
-      ? {
-          input: () => {
-            const input = keyboard.input();
-            input.steer *= keyboardSteer;
-            return input;
-          },
-        }
-      : undefined,
+    keyboard: keyboard ?? undefined,
     onJoin: () => sounds.playerJoined(),
   });
   const drivers = (id: number): Driver => session.driverFor(id);

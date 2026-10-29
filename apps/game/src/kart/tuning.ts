@@ -24,10 +24,16 @@ export const DRIFT_START_SPEED = 10;
 /** A drift ends (and pays out its mini-turbo) on BRAKE release, |steer| <= DRIFT_END_STEER or speed < DRIFT_END_SPEED. */
 export const DRIFT_END_STEER = 0.15;
 export const DRIFT_END_SPEED = 6;
-/** While drifting: mild drag instead of braking (m/s²), steer rate multiplier, and lower grip so the kart slides. */
+/** While drifting: mild drag instead of braking (m/s²), and lower grip so the kart slides. */
 export const DRIFT_DRAG = 2;
-export const DRIFT_STEER = 1.3;
 export const DRIFT_GRIP = 2.5;
+/**
+ * Drift turn rate band, in units of STEER_RATE: DRIFT_TURN_MIN up to |steer| = DRIFT_START_STEER, rising
+ * linearly to DRIFT_TURN_MAX at full lock. A phone at full tilt then carves a ~10 m hairpin instead of a
+ * 3 m donut, and a light tilt still slides round.
+ */
+export const DRIFT_TURN_MIN = 0.35;
+export const DRIFT_TURN_MAX = 0.6;
 /** Mini-turbo: seconds of drift charge for level 1 / 2, and the boost seconds each pays on release. */
 export const MT1 = 0.6;
 export const MT2 = 1.3;

@@ -2,8 +2,10 @@ import { describe, expect, test } from 'vitest';
 import { NEUTRAL_INPUT, type InputSnapshot } from '@rc/shared';
 import { buildTrack } from '../track/track';
 import { dist } from '../math/vec2';
-import { createKart, driftLevel, effectLeft, refreshEffect, resolveKartCollisions, stepKart, type Kart } from './kart';
-import { DRIFT_DRAG, DRIFT_STEER, KART_RADIUS, MAX_SPEED, MT1, MT2, REVERSE_MAX, STEER_RATE } from './tuning';
+import { createKart, driftLevel, driftTurn, effectLeft, refreshEffect, resolveKartCollisions, stepKart, type Kart } from './kart';
+import { DRIFT_DRAG, DRIFT_TURN_MAX, DRIFT_TURN_MIN, KART_RADIUS, MAX_SPEED, MT1, MT2, REVERSE_MAX, STEER_RATE } from './tuning';
+import { TRACK_V1 } from '../track/trackDef';
+import { wrapAngle } from '../math/vec2';
 
 // Long rounded rectangle, ~400 (z) x 80 (x), width 12. Start line at (0, -100) heading +z.
 const R = 40;
@@ -298,19 +300,80 @@ describe('drift and mini-turbo', () => {
     expect(k.drift.charge).toBeCloseTo(0.5, 5);
   });
 
-  test('drifting turns faster and slides: steer rate x1.3, velocity lags the nose', () => {
+  test('drift turn follows the band: 0.35 x STEER_RATE up to |steer| 0.3, rising to 0.6 at full lock', () => {
+    expect(DRIFT_TURN_MIN).toBe(0.35);
+    expect(DRIFT_TURN_MAX).toBe(0.6);
+    expect(driftTurn(0.2)).toBeCloseTo(0.35, 9);
+    expect(driftTurn(0.3)).toBeCloseTo(0.35, 9);
+    expect(driftTurn(0.65)).toBeCloseTo(0.475, 9);
+    expect(driftTurn(1)).toBeCloseTo(0.6, 9);
+    expect(driftTurn(-1)).toBeCloseTo(-0.6, 9);
     const k = rolling(15);
-    stepKart(k, driftIn(0.6), open, DT); // starts the drift
+    stepKart(k, driftIn(0.65), open, DT); // starts the drift
     const h0 = k.heading;
-    stepKart(k, driftIn(0.6), open, DT);
-    expect(k.heading - h0).toBeCloseTo(0.6 * STEER_RATE * DRIFT_STEER * DT, 6);
+    stepKart(k, driftIn(0.65), open, DT);
+    expect(k.heading - h0).toBeCloseTo(0.475 * STEER_RATE * DT, 6);
+  });
 
+  test('a drift slides: the velocity lags the nose more than in a grip turn at the same turn rate', () => {
     const slipAfter = (input: InputSnapshot): number => {
       const c = rolling(15);
-      step(c, input, 0.3);
-      return Math.abs(c.vel.x * Math.cos(c.heading) - c.vel.z * Math.sin(c.heading));
+      step(c, input, 0.6);
+      return Math.abs(wrapAngle(c.heading - Math.atan2(c.vel.x, c.vel.z)));
     };
-    expect(slipAfter(driftIn(1))).toBeGreaterThan(1.5 * slipAfter({ ...NEUTRAL_INPUT, gas: true, steer: 1 }));
+    // Full-lock drift turns at 0.6 x STEER_RATE, like a 0.6 grip turn.
+    expect(slipAfter(driftIn(1))).toBeGreaterThan(1.5 * slipAfter({ ...NEUTRAL_INPUT, gas: true, steer: 0.6 }));
+  });
+
+  // Into each hairpin at 18 m/s, phone tilted to full lock with BRAKE held: [start s (m), lateral, steer].
+  const hairpins: [string, number, number, number][] = [
+    ['right hairpin (s 252-277, radius ~10 m)', 248, -3, 1],
+    ['left hairpin (s 217-241, radius ~9 m)', 214, -3, -1],
+  ];
+  for (const [name, s0, lateral, lock] of hairpins) {
+    test(`a full-lock drift held through the TRACK_V1 ${name} earns MT2, never facing over 90 degrees off the road`, () => {
+      const v1 = buildTrack(TRACK_V1);
+      const k = createKart(0, '#FF8A80', v1.grid[0], v1);
+      k.pos = v1.pointAt(s0, lateral);
+      k.heading = v1.headingAt(s0);
+      k.trackIndex = v1.project(k.pos).index;
+      k.speed = 18;
+      k.vel = { x: Math.sin(k.heading) * 18, z: Math.cos(k.heading) * 18 };
+      const held: InputSnapshot = { steer: lock, gas: true, brake: true, item: false };
+      let worst = 0;
+      let wallHit = false;
+      for (let i = 0; i < 120 && k.drift.charge < MT2 + 0.05; i++) {
+        wallHit = stepKart(k, held, v1, DT).hitWall || wallHit;
+        const s = v1.project(k.pos, k.trackIndex).s;
+        worst = Math.max(worst, Math.abs(wrapAngle(k.heading - v1.headingAt(s))));
+      }
+      expect(wallHit).toBe(false);
+      expect(driftLevel(k)).toBe(2);
+      expect(worst).toBeLessThan(Math.PI / 2);
+      stepKart(k, { ...held, brake: false }, v1, DT);
+      expect(effectLeft(k, 'boost')).toBeCloseTo(1.2, 9);
+    });
+  }
+
+  test('BRAKE still held when a drift ends is ignored until it is let go: no hard stop, no reversing', () => {
+    const k = rolling(18);
+    step(k, driftIn(0.5), MT1 + 0.1);
+    // Straighten up with BRAKE still down: the drift ends and pays out...
+    const straight: InputSnapshot = { ...NEUTRAL_INPUT, gas: true, brake: true, steer: 0 };
+    stepKart(k, straight, open, DT);
+    expect(k.drift.active).toBe(false);
+    expect(effectLeft(k, 'boost')).toBeCloseTo(0.6, 9);
+    const v = k.speed;
+    // ...and the held BRAKE does nothing, even when steering again: the kart keeps driving.
+    step(k, straight, 0.5);
+    step(k, { ...straight, steer: 0.8 }, 0.2);
+    expect(k.speed).toBeGreaterThan(v);
+    expect(k.drift.active).toBe(false);
+    // Let go once, then BRAKE brakes again.
+    stepKart(k, { ...straight, brake: false }, open, DT);
+    const before = k.speed;
+    step(k, straight, 0.2);
+    expect(k.speed).toBeLessThan(before - 3);
   });
 
   test('driftLevel reads 0 → 1 at MT1 → 2 at MT2 while drifting', () => {
