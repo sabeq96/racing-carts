@@ -7,7 +7,8 @@ import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
 import { CreateGround } from '@babylonjs/core/Meshes/Builders/groundBuilder';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import type { Track } from '../track/track';
-import { ENV, SUN_DIR, WIND_X, WIND_Z, cloudMaterial, cloudShadowMaterial } from './shaders';
+import { CreateDisc } from '@babylonjs/core/Meshes/Builders/discBuilder';
+import { ENV, SUN_DIR, WIND_X, WIND_Z, cloudMaterial, cloudShadowMaterial, pondMaterial } from './shaders';
 
 /** Small deterministic PRNG (mulberry32), so the world is the same every boot. */
 export function seeded(seed: number): () => number {
@@ -21,6 +22,30 @@ export function seeded(seed: number): () => number {
   };
 }
 
+/** Distance (m) from (x, z) to the track's centre line. */
+export function centreDistance(track: Track, x: number, z: number): number {
+  return Math.abs(track.project({ x, z }).lateral);
+}
+
+// ----- pond -----
+
+/** A small pond in the big infield beside the start straight: water radius (m) and its sandy shore. */
+export const POND = { x: 22, z: 6, r: 5 };
+export const POND_SHORE = 1.7;
+
+/** The pond: one alpha-blended disc drawn by the pond shader (water, shore ring, soft edge). */
+export function buildPond(scene: Scene): void {
+  const pond = CreateDisc('pond', { radius: POND.r * 1.11 + POND_SHORE, tessellation: 40 }, scene);
+  pond.rotation.x = Math.PI / 2;
+  pond.position.set(POND.x, 0.03, POND.z);
+  const mat = pondMaterial(POND.x, POND.z, POND.r, scene);
+  mat.zOffset = -1;
+  pond.material = mat;
+  pond.isPickable = false;
+  pond.freezeWorldMatrix();
+  pond.doNotSyncBoundingInfo = true;
+}
+
 // ----- clouds -----
 
 const CLOUD_COUNT = 9;
@@ -28,8 +53,8 @@ const CLOUD_SEED = 7;
 /** Clouds drift inside the track bounds grown by this much, and wrap around at its edges. */
 const CLOUD_MARGIN = 70;
 /** Cloud heights (m): low enough to be seen from the steep camera at every zoom, like a diorama. */
-const CLOUD_MIN_Y = 10;
-const CLOUD_MAX_Y = 14;
+const CLOUD_MIN_Y = 7;
+const CLOUD_MAX_Y = 10;
 /** Drift speed along the wind (m/s). */
 const WIND_SPEED = 1.1;
 /** Near the wrap edges a cloud shrinks away (and grows back on the other side) over this many metres. */
@@ -61,6 +86,15 @@ export function edgeFade(x: number, z: number, area: Area, band: number): number
 export function screenFade(sx: number, sy: number): number {
   const e = Math.hypot(sx / 0.62, sy / 0.85);
   const t = Math.max(0, Math.min(1, (e - 0.85) / 0.3));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * 0 for a cloud nearer the camera than 40 m (`depth`: its view depth), 1 beyond 55 m: closer than
+ * that a cloud would fill a big part of the screen, so up close they only hang in the distance.
+ */
+export function nearFade(depth: number): number {
+  const t = Math.max(0, Math.min(1, (depth - 40) / 15));
   return t * t * (3 - 2 * t);
 }
 
@@ -115,7 +149,7 @@ export function buildClouds(scene: Scene, track: Track): void {
   for (let i = 0; i < CLOUD_COUNT; i++) {
     const mesh = cloudMesh(i, rand, scene);
     mesh.material = mat;
-    const size = 1.2 + rand() * 0.5;
+    const size = 0.95 + rand() * 0.35;
     const shadow = shadowSource.createInstance('cloudShadow' + i);
     shadow.isPickable = false;
     clouds.push({
@@ -139,7 +173,8 @@ export function buildClouds(scene: Scene, track: Track): void {
       const w = at.x * m[3] + c.y * m[7] + at.z * m[11] + m[15];
       const sx = (at.x * m[0] + c.y * m[4] + at.z * m[8] + m[12]) / w;
       const sy = (at.x * m[1] + c.y * m[5] + at.z * m[9] + m[13]) / w;
-      const seen = w > 0 ? screenFade(sx, sy) : 1;
+      // Clouds out at the edges of the view stay; ones over its middle or right by the lens shrink away.
+      const seen = w > 0 ? screenFade(sx, sy) * nearFade(w) : 0;
       c.mesh.position.set(at.x, c.y, at.z);
       c.mesh.scaling.setAll(s * seen);
       c.mesh.setEnabled(s * seen > 0.01);

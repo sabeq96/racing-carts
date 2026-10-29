@@ -13,6 +13,7 @@ import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { ItemBoxes } from '../powerups/itemBoxes';
 import type { EntityLook, PowerupEntity } from '../powerups/types';
 import { blobShadowMaterial, matte } from './scene';
+import { toonMaterial } from './shaders';
 
 /** Item boxes: edge length (m), float height of the centre, corner rounding. */
 const BOX_SIZE = 1.4;
@@ -117,10 +118,8 @@ export class EntityViews {
   constructor(private scene: Scene) {
     const box = new Mesh('itemBox', scene);
     roundedCube(BOX_SIZE, BOX_ROUND).applyToMesh(box);
-    // White matte: the vertex colours carry the rainbow, so faces read as the palette colours.
-    const mat = matte('itemBox', '#FFFFFF', scene);
-    mat.freeze();
-    box.material = mat;
+    // White toon: the vertex colours carry the rainbow, which slowly drifts round the hue wheel.
+    box.material = toonMaterial('itemBox', '#FFFFFF', scene, 0.2, 'shimmer');
     // Sources stay enabled but invisible: only their instances are drawn.
     box.isPickable = false;
     box.isVisible = false;

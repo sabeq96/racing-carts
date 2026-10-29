@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'vitest';
-import { cloudAt, edgeFade, screenFade, wrapInto, type Area } from './decor';
+import { buildTrack } from '../track/track';
+import { TRACK_V1 } from '../track/trackDef';
+import { POND, POND_SHORE, centreDistance, cloudAt, edgeFade, nearFade, screenFade, wrapInto, type Area } from './decor';
+
+const track = buildTrack(TRACK_V1);
 
 const area: Area = { minX: -50, minZ: 10, sizeX: 200, sizeZ: 100 };
 
@@ -47,5 +51,25 @@ describe('clouds', () => {
     const mid = screenFade(0.62, 0);
     expect(mid).toBeGreaterThan(0);
     expect(mid).toBeLessThan(1);
+  });
+});
+
+describe('cloud size on screen', () => {
+  test('clouds right by the lens shrink away; distant ones stay', () => {
+    expect(nearFade(20)).toBe(0);
+    expect(nearFade(40)).toBe(0);
+    expect(nearFade(47.5)).toBeCloseTo(0.5);
+    expect(nearFade(55)).toBe(1);
+    expect(nearFade(200)).toBe(1);
+  });
+});
+
+describe('pond', () => {
+  test('the whole pond, shore included, stays at least width/2 + 8 m from the centre line', () => {
+    const outer = POND.r * 1.11 + POND_SHORE; // the waterline wobbles up to 11 % out
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 36) {
+      const d = centreDistance(track, POND.x + Math.cos(a) * outer, POND.z + Math.sin(a) * outer);
+      expect(d).toBeGreaterThanOrEqual(track.width / 2 + 8);
+    }
   });
 });

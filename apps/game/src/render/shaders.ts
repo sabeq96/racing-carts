@@ -183,21 +183,45 @@ void main() {
 /**
  * Soft toon shading: three gentle bands (deep shade, mid, warm sunlit), and a subtle warm rim
  * that lifts silhouettes off the grass. Up-facing surfaces show `hex` itself. Vertex colours, if the
- * mesh has them, tint it.
+ * mesh has them, tint it. Works for plain meshes, clones and instances. Variants:
+ * - `sway`: foliage bends in the wind. The mesh's uv holds (phase, height where the foliage starts);
+ *   the bend grows with height above that, so the bottom (and the trunk, a separate mesh) stays put.
+ * - `shimmer`: a slow rainbow hue drift (luma kept, so pastels stay pastel), phased per instance by
+ *   where it stands.
  */
-export function toonMaterial(name: string, hex: string, scene: Scene, rim = 0.18): ShaderMaterial {
+export function toonMaterial(
+  name: string,
+  hex: string,
+  scene: Scene,
+  rim = 0.18,
+  variant: 'sway' | 'shimmer' | null = null,
+): ShaderMaterial {
   const m = shader(
     name,
     scene,
     `attribute vec3 normal;
+#ifdef SWAY
+attribute vec2 uv;
+#endif
 #ifdef VERTEXCOLOR
 attribute vec4 color;
 varying vec3 vColor;
+#endif
+#ifdef SHIMMER
+varying float vPhase;
 #endif
 varying vec3 vNormalW;
 void main() {
   mat4 w = worldMatrix();
   vec4 p = w * vec4(position, 1.0);
+#ifdef SWAY
+  float h = max(p.y - uv.y, 0.0);
+  float t = env.x * 1.7 + uv.x;
+  p.xz += vec2(${WIND_X.toFixed(3)}, ${WIND_Z.toFixed(3)}) * (sin(t) + 0.35 * sin(t * 2.3 + 1.0)) * h * 0.05;
+#endif
+#ifdef SHIMMER
+  vPhase = dot(w[3].xz, vec2(0.31, 0.17)) + p.y * 0.6;
+#endif
 #ifdef VERTEXCOLOR
   vColor = color.rgb;
 #endif
@@ -211,6 +235,9 @@ uniform float rim;
 #ifdef VERTEXCOLOR
 varying vec3 vColor;
 #endif
+#ifdef SHIMMER
+varying float vPhase;
+#endif
 varying vec3 vNormalW;
 void main() {
   vec3 n = normalize(vNormalW);
@@ -218,6 +245,17 @@ void main() {
   vec3 base = color;
 #ifdef VERTEXCOLOR
   base *= vColor;
+#endif
+#ifdef SHIMMER
+  // Rotate the hue in YIQ space (brightness stays) and soften it: pastels drift round the rainbow.
+  float a = env.x * 0.7 + vPhase;
+  float ca = cos(a), sa = sin(a);
+  float y = dot(base, vec3(0.299, 0.587, 0.114));
+  float i = dot(base, vec3(0.596, -0.274, -0.322));
+  float q = dot(base, vec3(0.211, -0.523, 0.312));
+  vec2 iq = vec2(i * ca - q * sa, i * sa + q * ca) * 0.55;
+  y = y * 0.9 + 0.1;
+  base = clamp(vec3(y + 0.956 * iq.x + 0.621 * iq.y, y - 0.272 * iq.x - 0.647 * iq.y, y - 1.106 * iq.x + 1.703 * iq.y), 0.0, 1.0);
 #endif
   // Shaded bands deepen towards a richer version of the colour (painterly, keeps it saturated).
   vec3 shade = base * mix(vec3(0.7, 0.7, 0.84), base, 0.35);
@@ -229,7 +267,11 @@ void main() {
   c = mix(c, vec3(1.0, 0.96, 0.88), r * r * rim);
   gl_FragColor = vec4(fog(c), 1.0);
 }`,
-    { attributes: ['normal'], uniforms: ['color', 'rim'] },
+    {
+      attributes: variant === 'sway' ? ['normal', 'uv'] : ['normal'],
+      uniforms: ['color', 'rim'],
+      defines: variant === 'sway' ? ['SWAY'] : variant === 'shimmer' ? ['SHIMMER'] : [],
+    },
   );
   m.setColor3('color', Color3.FromHexString(hex));
   m.setFloat('rim', rim);
@@ -345,5 +387,80 @@ void main() {
   );
   m.setColor3('color', Color3.FromHexString(hex));
   m.setTexture('noise', noise);
+  return m;
+}
+
+/**
+ * Boost pad: a pale butter pad whose warm chevrons scroll forward along the road and gently pulse.
+ * The pad's uv is (metres along the road, metres across); chevron arms sweep back by `sweep` per metre
+ * across, repeat every `spacing` metres and fill `depth` of it; they fade out before the pad's ends.
+ */
+export function padMaterial(
+  base: string,
+  arrow: string,
+  pad: { halfLength: number; halfWidth: number; spacing: number; depth: number; sweep: number },
+  scene: Scene,
+): ShaderMaterial {
+  const f = (v: number): string => v.toFixed(4);
+  return shader(
+    'boostPad',
+    scene,
+    FLAT_VERTEX,
+    `varying vec2 vUv;
+void main() {
+  float across = abs(vUv.y);
+  float u = fract((vUv.x + across * ${f(pad.sweep)}) / ${f(pad.spacing)} - env.x * 1.4);
+  float stripe = smoothstep(0.0, 0.06, u) - smoothstep(${f(pad.depth)}, ${f(pad.depth + 0.06)}, u);
+  float inside = (1.0 - smoothstep(${f(pad.halfWidth - 0.15)}, ${f(pad.halfWidth)}, across))
+    * (1.0 - smoothstep(${f(pad.halfLength - 0.6)}, ${f(pad.halfLength - 0.1)}, abs(vUv.x)));
+  float pulse = 0.5 + 0.5 * sin(env.x * 4.0);
+  vec3 c = mix(${glsl(base)} * (0.97 + 0.05 * pulse), ${glsl(arrow)} * (0.94 + 0.1 * pulse), stripe * inside);
+  gl_FragColor = vec4(fog(c), 1.0);
+}`,
+    { attributes: ['uv'] },
+  );
+}
+
+/** Direction of the light the pond glints with: low and ahead, so the glints face the camera. */
+const GLINT = new Vector3(0.37, 0.5, 0.78).normalize();
+
+/**
+ * Pond on a disc around (x, z): water out to an irregular waterline about `radius` from the centre
+ * (deeper teal in the middle, sky reflected at grazing angles, gentle travelling ripples and soft
+ * glints), then a ring of sand that fades into the grass.
+ */
+export function pondMaterial(x: number, z: number, radius: number, scene: Scene): ShaderMaterial {
+  const m = shader(
+    'pond',
+    scene,
+    FLAT_VERTEX,
+    `uniform vec3 pond;
+varying vec2 vUv;
+const vec3 GLINT = ${vec3(GLINT)};
+void main() {
+  vec2 d = vPosW.xz - pond.xy;
+  float dist = length(d);
+  float ang = atan(d.y, d.x);
+  float edge = pond.z * (1.0 + 0.07 * sin(3.0 * ang + 0.6) + 0.04 * sin(5.0 * ang + 2.1));
+  float e = dist - edge;
+  float t = env.x;
+  // Ripples: rings drifting out from the middle plus a slow cross swell, as a tilted normal.
+  vec2 grad = d / max(dist, 0.001) * cos(dist * 2.2 - t * 1.2) * 0.05
+    + vec2(cos(vPosW.x * 1.3 + vPosW.z * 0.4 + t * 0.9), cos(vPosW.z * 1.1 - vPosW.x * 0.3 - t * 0.7)) * 0.05;
+  vec3 n = normalize(vec3(-grad.x, 1.0, -grad.y));
+  vec3 v = normalize(cameraPosition - vPosW);
+  vec3 sky = mix(HORIZON, ZENITH, clamp(reflect(-v, n).y, 0.0, 1.0));
+  vec3 water = mix(vec3(0.4, 0.68, 0.8), vec3(0.62, 0.85, 0.86), smoothstep(-pond.z * 0.7, 0.0, e));
+  float fres = 1.0 - max(dot(n, v), 0.0);
+  water = mix(water, sky, 0.2 + 0.5 * fres * fres * fres);
+  water += vec3(1.0, 0.97, 0.9) * pow(max(dot(n, normalize(v + GLINT)), 0.0), 60.0) * 0.4;
+  water = mix(water, vec3(0.86, 0.95, 0.94), smoothstep(-0.5, 0.0, e) * 0.3);
+  vec3 sand = mix(vec3(0.85, 0.77, 0.61), vec3(0.96, 0.9, 0.77), smoothstep(0.0, 0.5, e));
+  vec3 c = mix(water, sand, smoothstep(-0.08, 0.08, e));
+  gl_FragColor = vec4(fog(c), 1.0 - smoothstep(1.0, 1.7, e));
+}`,
+    { attributes: ['uv'], uniforms: ['pond'], alpha: true },
+  );
+  m.setVector3('pond', new Vector3(x, z, radius));
   return m;
 }

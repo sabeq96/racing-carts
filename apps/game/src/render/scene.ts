@@ -19,8 +19,9 @@ import type { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 import { PAD_LENGTH, PAD_WIDTH } from '../race/boostPads';
 import type { Track } from '../track/track';
 import type { Texture } from '@babylonjs/core/Materials/Textures/texture';
-import { ENV, HORIZON, SUN_DIR, grassMaterial, noiseTexture, roadMaterial, skyMaterial, toonMaterial } from './shaders';
-import { buildClouds, seeded } from './decor';
+import { ENV, HORIZON, SUN_DIR, grassMaterial, noiseTexture, padMaterial, roadMaterial, skyMaterial, toonMaterial } from './shaders';
+import { POND, POND_SHORE, buildClouds, buildPond, seeded } from './decor';
+import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 
 export const PALETTE = {
   grass: '#BFE6A6',
@@ -202,8 +203,8 @@ function buildRoad(scene: Scene, track: Track, noise: Texture): void {
   settle(stripe);
 }
 
-/** Chevron arrows per pad: centres along the pad (m), half-width, how far the arms sweep back, stroke depth. */
-const CHEVRONS = [-0.75, 0.45, 1.65];
+/** Chevron arrows on a pad: spacing along it (m), half-width, how far the arms sweep back, stroke depth. */
+const CHEVRON_SPACING = 1.2;
 const CHEVRON_HALF = 1.45;
 const CHEVRON_SWEEP = 0.95;
 const CHEVRON_DEPTH = 0.55;
@@ -211,25 +212,15 @@ const CHEVRON_DEPTH = 0.55;
 const PAD_INSET = 0.15;
 const PAD_CORNER = 0.6;
 
-/** Soft unlit glow: the pads read as warm light on the road, not paint. */
-function glow(name: string, hex: string, scene: Scene): StandardMaterial {
-  const m = new StandardMaterial(name, scene);
-  m.disableLighting = true;
-  m.emissiveColor = Color3.FromHexString(hex);
-  m.diffuseColor = Color3.Black();
-  m.specularColor = Color3.Black();
-  m.backFaceCulling = false;
-  return m;
-}
-
-/** Flat polygons (fans from their first point) lying at height `y`, as one static mesh. */
+/** Flat polygons (fans from their first point) lying at height `y`, as one static mesh; points are [x, z, u, v]. */
 function flatMesh(name: string, polygons: number[][][], y: number, scene: Scene): Mesh {
-  const positions: number[] = [], indices: number[] = [], normals: number[] = [];
+  const positions: number[] = [], indices: number[] = [], normals: number[] = [], uvs: number[] = [];
   for (const poly of polygons) {
     const base = positions.length / 3;
-    for (const [x, z] of poly) {
+    for (const [x, z, u, v] of poly) {
       positions.push(x, y, z);
       normals.push(0, 1, 0);
+      uvs.push(u, v);
     }
     for (let i = 1; i + 1 < poly.length; i++) indices.push(base, base + i, base + i + 1);
   }
@@ -237,40 +228,39 @@ function flatMesh(name: string, polygons: number[][][], y: number, scene: Scene)
   data.positions = positions;
   data.indices = indices;
   data.normals = normals;
+  data.uvs = uvs;
   const mesh = new Mesh(name, scene);
   data.applyToMesh(mesh);
   settle(mesh);
   return mesh;
 }
 
-/** Boost pads: a pale butter pad with three warm-yellow chevrons pointing down the road. */
+/**
+ * Boost pads: a pale butter pad (clipped corners) with warm-yellow chevrons that scroll down the road.
+ * Each pad corner carries its (along, across) position in the pad's frame as uv for the shader.
+ */
 function buildBoostPads(scene: Scene, track: Track): void {
   if (track.boostPads.length === 0) return;
-  const bases: number[][][] = [], arrows: number[][][] = [];
+  const pads: number[][][] = [];
   for (const pad of track.boostPads) {
     const fx = Math.sin(pad.heading), fz = Math.cos(pad.heading);
     const rx = Math.cos(pad.heading), rz = -Math.sin(pad.heading);
-    // (along, across) in the pad's frame → world (x, z).
-    const at = (a: number, l: number): number[] => [pad.pos.x + fx * a + rx * l, pad.pos.z + fz * a + rz * l];
+    // (along, across) in the pad's frame → [world x, world z, along, across].
+    const at = (a: number, l: number): number[] => [pad.pos.x + fx * a + rx * l, pad.pos.z + fz * a + rz * l, a, l];
     const ha = PAD_LENGTH / 2 - PAD_INSET, hl = PAD_WIDTH / 2 - PAD_INSET, c = PAD_CORNER;
-    bases.push([at(0, 0), at(ha, -hl + c), at(ha, hl - c), at(ha - c, hl), at(-ha + c, hl), at(-ha, hl - c),
+    pads.push([at(0, 0), at(ha, -hl + c), at(ha, hl - c), at(ha - c, hl), at(-ha + c, hl), at(-ha, hl - c),
       at(-ha, -hl + c), at(-ha + c, -hl), at(ha - c, -hl), at(ha, -hl + c)]);
-    for (const mid of CHEVRONS) {
-      const front = mid + CHEVRON_DEPTH / 2, back = mid - CHEVRON_DEPTH / 2;
-      const arm = (tip: number, side: number) => at(tip - CHEVRON_SWEEP, side * CHEVRON_HALF);
-      // Two quads per chevron (left arm, right arm), sharing the tip edge.
-      arrows.push([at(front, 0), arm(front, 1), arm(back, 1), at(back, 0)]);
-      arrows.push([at(front, 0), at(back, 0), arm(back, -1), arm(front, -1)]);
-    }
   }
-  const baseMat = glow('padBase', PALETTE.padBase, scene);
-  baseMat.zOffset = -3;
-  flatMesh('boostPadBases', bases, 0.045, scene).material = baseMat;
-  baseMat.freeze();
-  const arrowMat = glow('padArrow', PALETTE.padArrow, scene);
-  arrowMat.zOffset = -4;
-  flatMesh('boostPadArrows', arrows, 0.05, scene).material = arrowMat;
-  arrowMat.freeze();
+  const mat = padMaterial(PALETTE.padBase, PALETTE.padArrow, {
+    halfLength: PAD_LENGTH / 2 - PAD_INSET,
+    halfWidth: CHEVRON_HALF,
+    spacing: CHEVRON_SPACING,
+    depth: CHEVRON_DEPTH / CHEVRON_SPACING,
+    sweep: CHEVRON_SWEEP / CHEVRON_HALF,
+  }, scene);
+  mat.zOffset = -3;
+  mat.backFaceCulling = false;
+  flatMesh('boostPads', pads, 0.045, scene).material = mat;
 }
 
 /** Candy-striped tube walls just outside both road edges, merged into one mesh per colour. */
@@ -306,7 +296,7 @@ function buildScenery(scene: Scene, track: Track): void {
   const b = track.bounds;
   const pad = GROUND_MARGIN - 4;
   const clear = track.width / 2 + 6;
-  const placed: { x: number; z: number; r: number }[] = [];
+  const placed: { x: number; z: number; r: number }[] = [{ x: POND.x, z: POND.z, r: POND.r + POND_SHORE }];
   const trunks: Mesh[] = [], canopies: Mesh[] = [], rocks: Mesh[] = [], shadows: Mesh[] = [];
 
   for (let tries = 0; placed.length < SCENERY_COUNT && tries < 4000; tries++) {
@@ -326,6 +316,13 @@ function buildScenery(scene: Scene, track: Track): void {
       trunks.push(trunk);
       const canopy = CreateSphere('canopy', { diameter: 4.2 * size, segments: 6 }, scene);
       canopy.position.set(x, trunkH + 1.6 * size, z);
+      // For the sway shader: uv = (this tree's phase, the height where its foliage starts).
+      const uv = canopy.getVerticesData(VertexBuffer.UVKind) as number[];
+      for (let i = 0; i < uv.length; i += 2) {
+        uv[i] = x * 0.37 + z * 0.23;
+        uv[i + 1] = trunkH - 0.5 * size;
+      }
+      canopy.setVerticesData(VertexBuffer.UVKind, uv);
       canopies.push(canopy);
     } else {
       const rock = CreateIcoSphere('rock', { radius: 1.6 * size, subdivisions: 1, flat: true }, scene);
@@ -345,7 +342,7 @@ function buildScenery(scene: Scene, track: Track): void {
     if (m) m.material = mat;
   };
   set(trunks, 'trunks', toonMaterial('trunk', PALETTE.trunk, scene, 0.08));
-  set(canopies, 'canopies', toonMaterial('canopy', PALETTE.canopy, scene, 0.12));
+  set(canopies, 'canopies', toonMaterial('canopy', PALETTE.canopy, scene, 0.12, 'sway'));
   set(rocks, 'rocks', toonMaterial('rock', PALETTE.rock, scene, 0.1));
   const shadowMat = blobShadowMaterial(scene);
   set(shadows, 'sceneryShadows', shadowMat);
@@ -403,6 +400,7 @@ export function createScene(engine: Engine, track: Track): Scene {
   buildBoostPads(scene, track);
   buildWalls(scene, track);
   buildScenery(scene, track);
+  buildPond(scene);
   buildClouds(scene, track);
 
   return scene;
