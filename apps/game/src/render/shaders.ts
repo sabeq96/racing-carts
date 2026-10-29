@@ -116,33 +116,6 @@ void main() {
   gl_Position = viewProjection * p;
 }`;
 
-/** Puffy clouds: flat white with a soft lavender shade on the side away from the sun. */
-export function cloudMaterial(scene: Scene): ShaderMaterial {
-  return shader(
-    'cloud',
-    scene,
-    `attribute vec3 normal;
-varying vec3 vNormalW;
-void main() {
-  mat4 w = worldMatrix();
-  vec4 p = w * vec4(position, 1.0);
-  vPosW = p.xyz;
-  vNormalW = normalize((w * vec4(normal, 0.0)).xyz);
-  vDepth = (view * p).z;
-  gl_Position = viewProjection * p;
-}`,
-    `varying vec3 vNormalW;
-void main() {
-  vec3 n = normalize(vNormalW);
-  float hl = dot(n, SUN) * 0.5 + 0.5;
-  vec3 c = mix(vec3(0.87, 0.87, 0.96), vec3(1.0, 0.98, 0.95), smoothstep(0.3, 0.75, hl));
-  c *= mix(0.94, 1.0, smoothstep(-0.6, 0.2, n.y));
-  gl_FragColor = vec4(fog(c), 1.0);
-}`,
-    { attributes: ['normal'] },
-  );
-}
-
 /** Soft blurred-disc cloud shadow on a unit ground quad (uv 0..1), one instance per cloud. */
 export function cloudShadowMaterial(scene: Scene): ShaderMaterial {
   const m = shader(
@@ -152,7 +125,7 @@ export function cloudShadowMaterial(scene: Scene): ShaderMaterial {
     `varying vec2 vUv;
 void main() {
   float r = length(vUv - 0.5) * 2.0;
-  float a = (1.0 - smoothstep(0.45, 1.0, r)) * 0.13;
+  float a = (1.0 - smoothstep(0.45, 1.0, r)) * 0.15;
   gl_FragColor = vec4(vec3(0.24, 0.27, 0.4), a);
 }`,
     { attributes: ['uv'], alpha: true },
@@ -168,8 +141,15 @@ void main() {
  * - `sway`: foliage bends in the wind, more the higher it is above 1.5 m (trunks are a separate mesh),
  *   each tree phased by where it stands.
  * - `shimmer`: colours drift towards their rotated neighbours (r→g→b) and back, phased per instance.
+ * - `cloud`: fades out within 15-35 m of the camera (drawn after a depth pre-pass, so a half-faded
+ *   cloud shows only its front, not its inner puffs).
  */
-export function toonMaterial(name: string, hex: string, scene: Scene, variant: 'sway' | 'shimmer' | null = null): ShaderMaterial {
+export function toonMaterial(
+  name: string,
+  hex: string,
+  scene: Scene,
+  variant: 'sway' | 'shimmer' | 'cloud' | null = null,
+): ShaderMaterial {
   const m = shader(
     name,
     scene,
@@ -228,15 +208,21 @@ void main() {
   float r = 1.0 - max(dot(n, normalize(cameraPosition - vPosW)), 0.0);
   r *= r;
   c = mix(c, vec3(1.0, 0.96, 0.88), r * r * 0.12);
+#ifdef FADE
+  gl_FragColor = vec4(fog(c), smoothstep(15.0, 35.0, vDepth));
+#else
   gl_FragColor = vec4(fog(c), 1.0);
+#endif
 }`,
     {
       attributes: ['normal'],
       uniforms: ['tint'],
-      defines: variant === 'sway' ? ['SWAY'] : variant === 'shimmer' ? ['SHIMMER'] : [],
+      defines: variant === 'sway' ? ['SWAY'] : variant === 'shimmer' ? ['SHIMMER'] : variant === 'cloud' ? ['FADE'] : [],
+      alpha: variant === 'cloud',
     },
   );
   m.setColor3('tint', Color3.FromHexString(hex));
+  m.needDepthPrePass = variant === 'cloud';
   return m;
 }
 
