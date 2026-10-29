@@ -23,11 +23,11 @@ export function isFinished(k: Kart, track: Track): boolean {
   return k.distance >= TOTAL_LAPS * track.length;
 }
 
-/** Finished karts by finish time, then everyone else by distance (furthest first). Returns a new array. */
+/** Finished karts by finish time (ties by distance), then everyone else by distance (furthest first). Returns a new array. */
 export function rankKarts(karts: Kart[]): Kart[] {
   return [...karts].sort((a, b) => {
     const fa = a.finishedAt !== null, fb = b.finishedAt !== null;
-    if (fa && fb) return (a.finishedAt as number) - (b.finishedAt as number);
+    if (fa && fb) return (a.finishedAt as number) - (b.finishedAt as number) || b.distance - a.distance;
     if (fa !== fb) return fa ? -1 : 1;
     return b.distance - a.distance;
   });

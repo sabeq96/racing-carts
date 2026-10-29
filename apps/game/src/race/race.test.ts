@@ -165,6 +165,47 @@ describe('Race', () => {
     expect(ev).toEqual([]);
   });
 
+  test('karts finishing in the same step are placed by distance, whatever the array order', () => {
+    for (const order of [[0, 1], [1, 0]]) {
+      const karts = makeKarts(2, [0, 1]);
+      const race = new Race();
+      goRacing(race, karts);
+      const total = L * TOTAL_LAPS;
+      for (const k of karts) k.distance = total - 3;
+      // Both cross the line in one step; kart 0 ends up 1 m further past it than kart 1.
+      karts[0].pos = track.pointAt(total + 1);
+      karts[1].pos = track.pointAt(total);
+      const ev = race.update(0.01, order.map((i) => karts[i]), track, isHuman);
+      const finishes = ev.filter((e) => e.kind === 'finish');
+      expect(finishes).toEqual([
+        { kind: 'finish', kartId: 0, place: 1 },
+        { kind: 'finish', kartId: 1, place: 2 },
+      ]);
+      expect(karts[0].finishedAt).toBe(karts[1].finishedAt);
+    }
+  });
+
+  test('dithering across the line into lap 3 emits finalLap exactly once', () => {
+    const karts = makeKarts(1, [0]);
+    const race = new Race();
+    goRacing(race, karts);
+    const ev: RaceEvent[] = [];
+    ev.push(...drive(race, karts, karts[0], L * 2 - 4));
+    for (let i = 0; i < 6; i++) {
+      for (const d of [L * 2 + 4, L * 2 - 4]) {
+        const target = d;
+        while (Math.abs(karts[0].distance - target) > 1e-6) {
+          const step = Math.sign(target - karts[0].distance) * Math.min(2, Math.abs(target - karts[0].distance));
+          karts[0].pos = track.pointAt(karts[0].distance + step);
+          ev.push(...race.update(0.01, karts, track, isHuman));
+        }
+      }
+    }
+    expect(ev.filter((e) => e.kind === 'finalLap')).toHaveLength(1);
+    expect(ev.filter((e) => e.kind === 'lap' && e.lap === 3)).toHaveLength(1);
+    expect(ev.filter((e) => e.kind === 'lap' && e.lap === 2)).toHaveLength(1);
+  });
+
   test('backToLobby then start resets the race', () => {
     const karts = makeKarts(1, [0]);
     const race = new Race();
@@ -176,5 +217,38 @@ describe('Race', () => {
     race.start();
     expect(race.phase).toBe('countdown');
     expect(race.time).toBe(0);
+  });
+
+  test('a second race after results starts clean: place 1 to first finisher, old cutoff clock gone', () => {
+    const karts = makeKarts(2, [0, 1]);
+    const race = new Race();
+    const total = L * TOTAL_LAPS;
+    goRacing(race, karts);
+    drive(race, karts, karts[0], total); // human 0 finishes early in race 1
+    while (race.phase === 'racing') race.update(0.5, karts, track, isHuman);
+    expect(race.phase).toBe('results');
+    expect(karts[1].finishedAt).toBeNull();
+
+    // Caller resets karts to the grid, then the next race starts straight from results.
+    karts.forEach((k, i) => {
+      const slot = track.grid[i];
+      k.pos = { x: slot.pos.x, z: slot.pos.z };
+      k.distance = slot.s;
+      k.trackIndex = track.project(slot.pos).index;
+      k.finishedAt = null;
+    });
+    const ev = goRacing(race, karts);
+    expect(ev.map((e) => (e.kind === 'countdown' ? e.n : e.kind))).toEqual([3, 2, 1, 'go']);
+    expect(race.time).toBe(0);
+
+    // Nobody finishes for well over 30 s: a stale cutoff clock would end the race.
+    for (let i = 0; i < 80; i++) race.update(0.5, karts, track, isHuman);
+    expect(race.phase).toBe('racing');
+
+    // Lap events start fresh too (no stale announced-lap state): lap 2 is announced again.
+    const lapEv = drive(race, karts, karts[1], total);
+    expect(lapEv).toContainEqual({ kind: 'lap', kartId: 1, lap: 2 });
+    expect(lapEv).toContainEqual({ kind: 'finish', kartId: 1, place: 1 });
+    expect(race.phase).toBe('racing');
   });
 });

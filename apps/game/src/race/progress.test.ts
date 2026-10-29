@@ -96,6 +96,14 @@ describe('progress', () => {
     expect(ranked.map((k) => k.id)).toEqual([2, 1, 0, 3]);
   });
 
+  test('rankKarts: equal finishedAt is tie-broken by distance, whatever the array order', () => {
+    const a = kartAt(0, 0), b = kartAt(0, 1);
+    a.distance = L * 3 + 1; a.finishedAt = 40;
+    b.distance = L * 3 + 4; b.finishedAt = 40;
+    expect(rankKarts([a, b]).map((k) => k.id)).toEqual([1, 0]);
+    expect(rankKarts([b, a]).map((k) => k.id)).toEqual([1, 0]);
+  });
+
   test('rankKarts does not mutate its input', () => {
     const a = kartAt(0, 0), b = kartAt(0, 1);
     b.distance = 50;

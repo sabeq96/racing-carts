@@ -23,6 +23,8 @@ export class Race {
   private countdownLeft = COUNTDOWN_SECONDS;
   private nextCount: 3 | 2 | 1 | 0 = 3;
   private finishCount = 0;
+  /** Highest lap already announced per kart, so dithering across the line never repeats events. */
+  private announcedLap = new Map<number, number>();
   private firstHumanFinishedAt: number | null = null;
 
   start(): void {
@@ -32,6 +34,7 @@ export class Race {
     this.countdownLeft = COUNTDOWN_SECONDS;
     this.nextCount = 3;
     this.finishCount = 0;
+    this.announcedLap.clear();
     this.firstHumanFinishedAt = null;
   }
 
@@ -39,6 +42,7 @@ export class Race {
     this.phase = 'lobby';
     this.time = 0;
     this.finishCount = 0;
+    this.announcedLap.clear();
     this.firstHumanFinishedAt = null;
   }
 
@@ -58,20 +62,25 @@ export class Race {
     if (this.phase !== 'racing') return events;
 
     this.time += dt;
+    const finishers: Kart[] = [];
     for (const k of karts) {
       if (k.finishedAt !== null) continue;
-      const lapBefore = lapOf(k, track);
       updateProgress(k, track);
-      const lapAfter = lapOf(k, track);
-      for (let lap = lapBefore + 1; lap <= lapAfter; lap++) {
-        events.push({ kind: 'lap', kartId: k.id, lap });
-        if (lap === TOTAL_LAPS) events.push({ kind: 'finalLap', kartId: k.id });
+      const lap = lapOf(k, track);
+      const announced = this.announcedLap.get(k.id) ?? 1;
+      for (let l = announced + 1; l <= lap; l++) {
+        events.push({ kind: 'lap', kartId: k.id, lap: l });
+        if (l === TOTAL_LAPS) events.push({ kind: 'finalLap', kartId: k.id });
       }
-      if (isFinished(k, track)) {
-        k.finishedAt = this.time;
-        events.push({ kind: 'finish', kartId: k.id, place: ++this.finishCount });
-        if (this.firstHumanFinishedAt === null && isHuman(k.id)) this.firstHumanFinishedAt = this.time;
-      }
+      if (lap > announced) this.announcedLap.set(k.id, lap);
+      if (isFinished(k, track)) finishers.push(k);
+    }
+    // Karts crossing the line in the same step are placed by how far past it they are.
+    finishers.sort((a, b) => b.distance - a.distance);
+    for (const k of finishers) {
+      k.finishedAt = this.time;
+      events.push({ kind: 'finish', kartId: k.id, place: ++this.finishCount });
+      if (this.firstHumanFinishedAt === null && isHuman(k.id)) this.firstHumanFinishedAt = this.time;
     }
 
     if (this.raceIsOver(karts, isHuman)) {
