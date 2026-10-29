@@ -61,6 +61,11 @@ export class Session {
   /** One brain per kart id, created at every race start (human slots too, for when they drop). */
   private brains: BotBrain[] = [];
   private readonly rand: () => number;
+  /**
+   * While showing results: the tokens that were connected when the race ended. Anyone else (a phone that
+   * joined or came back afterwards) gets position 0, since a bot drove that kart. Null outside results.
+   */
+  private resultTokens: Set<string> | null = null;
 
   constructor(
     private game: Game,
@@ -77,8 +82,13 @@ export class Session {
 
   onHello(token: string, name: string): ServerMsg | null {
     if (token === KEYBOARD_TOKEN) return { t: 'lobbyFull' }; // reserved for the TV's own keyboard
+    this.noteRaceEnd();
     this.purgeExpired();
-    const res = this.registry.join(token, name, this.game.race.phase);
+    let res = this.registry.join(token, name, this.game.race.phase);
+    if (res === 'full' && this.game.race.phase === 'results' && this.removeDisconnected()) {
+      // The race is over, so players who left no longer need their slots: make room for the newcomer.
+      res = this.registry.join(token, name, this.game.race.phase);
+    }
     if (res === 'full') return { t: 'lobbyFull' };
     this.inputs.delete(token);
     this.lastSent.delete(token);
@@ -90,6 +100,7 @@ export class Session {
   }
 
   onMessage(token: string, msg: ClientMsg): void {
+    this.noteRaceEnd();
     const p = this.registry.byToken(token);
     if (!p || !p.connected) return;
     const race = this.game.race;
@@ -111,8 +122,10 @@ export class Session {
         if (race.phase === 'lobby' && this.isHost(token)) this.startRace(this.kartCount());
         break;
       case 'rematch':
-        // Same lineup back on the grid; a phone that joined mid-race in a kartless slot gets one now.
+        // Same grid back again, minus players who left (bots fill their karts); a phone that joined
+        // mid-race or during the results in a kartless slot gets its kart now.
         if (race.phase === 'results' && this.isHost(token)) {
+          this.removeDisconnected();
           this.startRace(Math.max(this.game.karts.length, this.highestSlot() + 1));
         }
         break;
@@ -120,6 +133,7 @@ export class Session {
   }
 
   onDisconnect(token: string): void {
+    this.noteRaceEnd();
     // In the lobby the slot is held for a grace period, so a phone that blips keeps its place.
     this.registry.disconnect(token, this.game.race.phase, this.now());
     this.inputs.delete(token);
@@ -159,20 +173,23 @@ export class Session {
    */
   syncPhones(): void {
     const now = this.now();
+    this.noteRaceEnd();
     this.purgeExpired();
     const karts = this.game.karts;
     const lobby = this.game.race.phase === 'lobby';
+    const raced = this.resultTokens;
     const ranked = lobby ? [] : rankKarts(karts);
     const players = this.registry.all();
     const host = this.registry.hostToken();
     for (const p of players) {
       if (!p.connected || p.token === KEYBOARD_TOKEN) continue;
-      const kart = lobby ? undefined : karts.find((k) => k.id === p.slot);
+      // No kart to report: the lobby, or results for a race this phone was not in at the end.
+      const kart = lobby || (raced && !raced.has(p.token)) ? undefined : karts.find((k) => k.id === p.slot);
       const msg: StateMsg = {
         t: 'state',
         phase: this.game.race.phase,
         isHost: p.token === host,
-        // 0 = no place to show (lobby, or a phone that joined into a slot with no kart this race).
+        // 0 = no place to show (lobby, a phone in a slot with no kart this race, or one that missed the end).
         position: kart ? ranked.indexOf(kart) + 1 : 0,
         racers: lobby ? players.length : karts.length,
         lap: kart ? lapOf(kart, this.game.track) : 1,
@@ -270,7 +287,31 @@ export class Session {
     return NEUTRAL_INPUT;
   }
 
-  /** Lobby only: drops players whose grace period ran out (afterwards a dropped slot is kept for good). */
+  /**
+   * Called first by every entry point, so it sees the race end before any join, leave or rejoin that
+   * follows it (phases only change inside `game.step`): remembers who was connected at that moment.
+   */
+  private noteRaceEnd(): void {
+    if (this.game.race.phase !== 'results') {
+      this.resultTokens = null;
+    } else if (this.resultTokens === null) {
+      this.resultTokens = new Set();
+      for (const p of this.registry.all()) if (p.connected) this.resultTokens.add(p.token);
+    }
+  }
+
+  /** Removes every disconnected player (between races) and forgets their per-phone state; returns how many. */
+  private removeDisconnected(): number {
+    const gone = this.registry.removeDisconnected();
+    for (const t of gone) {
+      this.lastSent.delete(t);
+      this.humanDrivers.delete(t);
+      this.inputs.delete(t);
+    }
+    return gone.length;
+  }
+
+  /** Lobby only: drops players whose grace period ran out (in a race a dropped slot is kept until the rematch). */
   private purgeExpired(): void {
     if (this.game.race.phase !== 'lobby') return;
     const gone = this.registry.purgeExpired(this.now());

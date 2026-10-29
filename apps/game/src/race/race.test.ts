@@ -206,19 +206,6 @@ describe('Race', () => {
     expect(ev.filter((e) => e.kind === 'lap' && e.lap === 2)).toHaveLength(1);
   });
 
-  test('backToLobby then start resets the race', () => {
-    const karts = makeKarts(1, [0]);
-    const race = new Race();
-    goRacing(race, karts);
-    drive(race, karts, karts[0], L * TOTAL_LAPS);
-    expect(race.phase).toBe('results');
-    race.backToLobby();
-    expect(race.phase).toBe('lobby');
-    race.start();
-    expect(race.phase).toBe('countdown');
-    expect(race.time).toBe(0);
-  });
-
   test('a second race after results starts clean: place 1 to first finisher, old cutoff clock gone', () => {
     const karts = makeKarts(2, [0, 1]);
     const race = new Race();

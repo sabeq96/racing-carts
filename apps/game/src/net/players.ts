@@ -43,7 +43,7 @@ export class PlayerRegistry {
   /**
    * Marks the player disconnected, keeping their slot. In the lobby this starts a grace period
    * (`now` is the caller's clock in ms): `purgeExpired` removes them once it runs out. In other
-   * phases the slot is kept for good (a bot drives the kart until they rejoin).
+   * phases the slot is kept until `removeDisconnected` (a bot drives the kart until they rejoin).
    */
   disconnect(token: string, phase: Phase, now = 0): void {
     const p = this.players.get(token);
@@ -58,6 +58,17 @@ export class PlayerRegistry {
     for (const p of this.players.values()) {
       if (!p.connected && p.leftAt !== null && now - p.leftAt >= LOBBY_GRACE_MS) gone.push(p.token);
     }
+    for (const t of gone) this.players.delete(t);
+    return gone;
+  }
+
+  /**
+   * Removes every disconnected player, in or out of a grace period, and returns their tokens. Used between
+   * races so players who left stop holding slots; a returning phone simply joins again into a free slot.
+   */
+  removeDisconnected(): string[] {
+    const gone: string[] = [];
+    for (const p of this.players.values()) if (!p.connected) gone.push(p.token);
     for (const t of gone) this.players.delete(t);
     return gone;
   }

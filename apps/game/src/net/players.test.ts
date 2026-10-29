@@ -49,3 +49,13 @@ test('host is earliest-joined connected player and passes on', () => {
   r.disconnect('a', 'racing'); expect(r.hostToken()).toBe('b');
   r.join('a', 'A', 'racing'); expect(r.hostToken()).toBe('a');
 });
+test('removeDisconnected drops every disconnected player (grace or not) and frees their slots', () => {
+  const r = new PlayerRegistry(); r.join('a', 'A', 'lobby'); r.join('b', 'B', 'lobby'); r.join('c', 'C', 'lobby');
+  r.disconnect('b', 'racing');
+  r.disconnect('c', 'lobby', 0);
+  expect(r.removeDisconnected().sort()).toEqual(['b', 'c']);
+  expect(r.all().map((p) => p.token)).toEqual(['a']);
+  expect(r.removeDisconnected()).toEqual([]);
+  // A returning phone is simply a new player in the lowest free slot.
+  expect(r.join('c', 'C', 'results')).toEqual({ slot: 1, rejoined: false });
+});

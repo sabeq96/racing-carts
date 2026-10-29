@@ -38,14 +38,6 @@ export class Race {
     this.firstHumanFinishedAt = null;
   }
 
-  backToLobby(): void {
-    this.phase = 'lobby';
-    this.time = 0;
-    this.finishCount = 0;
-    this.announcedLap.clear();
-    this.firstHumanFinishedAt = null;
-  }
-
   update(dt: number, karts: Kart[], track: Track, isHuman: (kartId: number) => boolean): RaceEvent[] {
     const events: RaceEvent[] = [];
     if (this.phase === 'countdown') {

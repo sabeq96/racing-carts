@@ -343,9 +343,127 @@ test('rematch from results: host only, same lineup back on the grid, straight to
   expect(game.karts.map((k) => k.id)).toEqual([0, 1, 2, 3]);
   expect(game.karts[0].pos).toEqual(track.grid[0].pos);
   expect(game.karts[0].speed).toBe(0);
-  expect(session.driverFor(1)).toMatchObject({ kind: 'bot', name: 'Bea' });
+  // Bea left before the rematch: her slot is freed and a plain bot drives kart 1.
+  expect(session.driverFor(1)).toMatchObject({ kind: 'bot', name: 'Sky' });
   expect(session.driverFor(2)).toMatchObject({ kind: 'human', name: 'Cy' });
   expect(session.driverFor(0).input()).toEqual(NEUTRAL_INPUT); // race inputs are cleared
+});
+
+test('rematch drops players who left; a returning phone rejoins into a free slot', () => {
+  const joins: string[] = [];
+  const game = new Game(track, mulberry32(7));
+  const registry = new PlayerRegistry();
+  const session = new Session(game, registry, send, {
+    maxBots: 0,
+    now: () => clock,
+    rand: mulberry32(42),
+    onJoin: (t) => joins.push(t),
+  });
+  session.onHello('a', 'Ada');
+  session.onHello('b', 'Bea');
+  session.onHello('c', 'Cy');
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  session.onDisconnect('b');
+  game.race.phase = 'results';
+  expect(registry.byToken('b')).toBeDefined(); // still held through the results
+  session.onMessage('a', { t: 'rematch' });
+  expect(game.race.phase).toBe('countdown');
+  expect(registry.byToken('b')).toBeUndefined();
+  expect(registry.all().map((p) => p.token)).toEqual(['a', 'c']);
+  expect(game.karts.map((k) => k.id)).toEqual([0, 1, 2]); // same grid; a bot fills the gap
+  expect(session.driverFor(1)).toMatchObject({ kind: 'bot', name: 'Sky' });
+
+  sent = [];
+  expect(session.onHello('b', 'Bea')).toBeNull();
+  expect(to('b')[0]).toEqual({ t: 'welcome', slot: 1, color: KART_COLORS[1] });
+  expect(joins).toEqual(['a', 'b', 'c', 'b']); // a fresh join
+  expect(session.driverFor(1)).toMatchObject({ kind: 'human', name: 'Bea' });
+});
+
+test('a phone joining during results gets a slot and its own kart in the rematch', () => {
+  const { game, session } = setup(0);
+  session.onHello('a', 'Ada');
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  game.race.phase = 'results';
+  expect(game.karts).toHaveLength(1);
+  expect(session.onHello('late', 'Lou')).toBeNull();
+  expect(to('late')[0]).toEqual({ t: 'welcome', slot: 1, color: KART_COLORS[1] });
+  session.onMessage('a', { t: 'rematch' });
+  expect(game.karts.map((k) => k.id)).toEqual([0, 1]);
+  expect(session.driverFor(1)).toMatchObject({ kind: 'human', name: 'Lou' });
+  expect(lastState('late')).toMatchObject({ phase: 'countdown', racers: 2 });
+  expect(lastState('late')?.position).toBeGreaterThan(0);
+});
+
+test('a phone joining during the countdown drives a kart now or, if its slot has none, in the next race', () => {
+  const now = setup(2);
+  now.session.onHello('a', 'Ada');
+  now.session.onMessage('a', { t: 'start' });
+  expect(now.game.karts).toHaveLength(3);
+  now.session.onHello('c', 'Cy'); // slot 1 has a bot kart: Cy takes it over this race
+  expect(now.session.driverFor(1)).toMatchObject({ kind: 'human', name: 'Cy' });
+
+  const next = setup(0);
+  next.session.onHello('a', 'Ada');
+  next.session.onMessage('a', { t: 'start' });
+  next.session.onHello('c', 'Cy'); // no kart in slot 1 this race
+  expect(next.game.karts).toHaveLength(1);
+  stepUntil(next.game, next.session, 'racing');
+  next.game.race.phase = 'results';
+  next.session.onMessage('a', { t: 'rematch' });
+  expect(next.game.karts.map((k) => k.id)).toEqual([0, 1]);
+  expect(next.session.driverFor(1)).toMatchObject({ kind: 'human', name: 'Cy' });
+});
+
+test('a full room during results makes space by dropping players who left', () => {
+  const { game, registry, session } = setup(0);
+  for (const t of ['a', 'b', 'c', 'd', 'e', 'f']) session.onHello(t, t.toUpperCase());
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  session.onDisconnect('d');
+  expect(session.onHello('late', 'Lou')).toEqual({ t: 'lobbyFull' }); // mid-race: d's kart is still out there
+  game.race.phase = 'results';
+  expect(session.onHello('late', 'Lou')).toBeNull();
+  expect(to('late')).toContainEqual({ t: 'welcome', slot: 3, color: KART_COLORS[3] });
+  expect(registry.byToken('d')).toBeUndefined();
+});
+
+test('results: a phone that was not connected when the race ended gets position 0, not a bot\'s place', () => {
+  const { game, session } = setup(3);
+  session.onHello('a', 'Ada');
+  session.onHello('b', 'Bea');
+  session.onHello('d', 'Dee');
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  session.onDisconnect('b'); // left mid-race: a bot drove her kart home
+  // Everyone crosses the line in the same step, Bea's kart (bot-driven) first.
+  const past = [10, 14, 6, 2, 2, 2];
+  const lateral = [0, 0, 0, -4, 0, 4]; // spread out, so no kart bumps another back over the line
+  game.karts.forEach((k, i) => {
+    k.distance = 3 * track.length + past[i];
+    k.pos = track.pointAt(past[i], lateral[i]);
+    k.trackIndex = track.project(k.pos).index;
+  });
+  stepUntil(game, session, 'results', 5);
+  expect(game.race.phase).toBe('results');
+
+  session.onHello('late', 'Lou'); // slot 3: a bot raced that kart
+  session.onHello('b', 'Bea'); // back after the race ended
+  session.onDisconnect('d'); // connected at the end, then a blip
+  session.onHello('d', 'Dee');
+  session.syncPhones();
+  expect(lastState('a')).toMatchObject({ phase: 'results', position: 2 });
+  expect(lastState('d')).toMatchObject({ phase: 'results', position: 3 });
+  expect(lastState('late')).toMatchObject({ phase: 'results', position: 0 });
+  expect(lastState('b')).toMatchObject({ phase: 'results', position: 0 });
+  // The rematch is a new race: everyone gets their place again.
+  session.onMessage('a', { t: 'rematch' });
+  stepUntil(game, session, 'racing');
+  session.syncPhones();
+  expect(lastState('late')?.position).toBeGreaterThan(0);
+  expect(lastState('b')?.position).toBeGreaterThan(0);
 });
 
 test('sendEvent goes to the phone driving that kart only', () => {
