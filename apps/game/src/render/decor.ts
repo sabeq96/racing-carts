@@ -43,7 +43,7 @@ export interface Circle {
 // ----- pond -----
 
 /** A small round pond in the big infield beside the start straight: water radius (m) and where its sandy shore ends. */
-export const POND = { x: 22, z: 6, r: 5 };
+export const POND = { x: 22, z: 26, r: 5 };
 export const POND_OUTER = POND.r + 1.7;
 
 /** The pond: one alpha-blended disc drawn by the pond shader (water, shore ring, soft edge). */
@@ -188,10 +188,10 @@ const BANNER_HEIGHT = 1.95;
 const BUNTING_S = [14, 32, 50, 68];
 const BUNTING_LATERAL = -8.8;
 const POLE_HEIGHT = 4.2;
-/** Fences on the outside (left) of the far hairpin and the last corner: s ranges (m) and lateral. */
+/** Fences on the outside (left) of the far hairpin and the last corner: s ranges (m), all clear of other road. */
 const FENCE_RANGES: readonly (readonly [number, number])[] = [[112, 200], [352, 404]];
 const FENCE_LATERAL = -8.6;
-const FENCE_STEP = 2.4;
+const FENCE_STEP = 1.8;
 const FLOWER_PATCHES = 26;
 const BUSHES = 14;
 const DECOR_SEED = 4242;
@@ -206,34 +206,16 @@ export function buntingLayout(track: Track): { x: number; z: number }[] {
   return BUNTING_S.map((s) => track.pointAt(s, BUNTING_LATERAL));
 }
 
-/**
- * Fence posts every FENCE_STEP metres along the fence line, in runs (rails join neighbours in a run).
- * A post that would come near another bit of road is left out, which splits its run.
- */
+/** Fence posts every FENCE_STEP metres of road, one run per corner (rails join neighbours in a run). */
 export function fenceLayout(track: Track): { x: number; z: number }[][] {
-  const runs: { x: number; z: number }[][] = [];
-  for (const [from, to] of FENCE_RANGES) {
-    let run: { x: number; z: number }[] = [];
-    let prev = track.pointAt(from, FENCE_LATERAL);
-    let walked = FENCE_STEP;
-    for (let s = from; s <= to; s += 0.25) {
-      const p = track.pointAt(s, FENCE_LATERAL);
-      walked += Math.hypot(p.x - prev.x, p.z - prev.z);
-      prev = p;
-      if (walked < FENCE_STEP) continue;
-      walked = 0;
-      if (centreDistance(track, p.x, p.z) >= track.width / 2 + 2) run.push(p);
-      else if (run.length > 0) {
-        runs.push(run);
-        run = [];
-      }
-    }
-    if (run.length > 0) runs.push(run);
-  }
-  return runs;
+  return FENCE_RANGES.map(([from, to]) => {
+    const run: { x: number; z: number }[] = [];
+    for (let s = from; s <= to; s += FENCE_STEP) run.push(track.pointAt(s, FENCE_LATERAL));
+    return run;
+  });
 }
 
-/** Room the fixed decorations need, so trees, rocks, flowers and bushes keep out of it. */
+/** Room the fixed decorations need, so flowers and bushes keep out of it (and the tests check the trees and rocks do). */
 export function fixedBlockers(track: Track): Circle[] {
   const out: Circle[] = [{ x: POND.x, z: POND.z, r: POND_OUTER }];
   for (const p of archLayout(track).posts) out.push({ x: p.x, z: p.z, r: 1 });
@@ -318,27 +300,22 @@ function bake(name: string, parts: VertexData[], scene: Scene): Mesh {
 /** The arch's banner: checkered stripes top and bottom and "Racing Carts", drawn once. */
 function bannerTexture(scene: Scene): DynamicTexture {
   const tex = new DynamicTexture('banner', { width: 1024, height: 128 }, scene, true);
-  const draw = (): void => {
-    const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
-    ctx.fillStyle = '#FFF3E0';
-    ctx.fillRect(0, 0, 1024, 128);
-    // Two rows of checks along the top and the bottom edge.
-    const sq = 16;
-    for (let col = 0; col < 1024 / sq; col++)
-      for (const row of [0, 1, 6, 7]) {
-        ctx.fillStyle = (col + row) % 2 === 0 ? '#5B4638' : '#FFF3E0';
-        ctx.fillRect(col * sq, row * sq, sq, sq);
-      }
-    ctx.font = '900 60px Nunito, ui-rounded, system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#FF7A70';
-    ctx.fillText('Racing Carts', 512, 66);
-    tex.update();
-  };
-  draw();
-  // The rounded font may still be loading at boot: redraw once when it is in.
-  if (typeof document !== 'undefined' && document.fonts) void document.fonts.ready.then(draw);
+  const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
+  ctx.fillStyle = '#FFF3E0';
+  ctx.fillRect(0, 0, 1024, 128);
+  // Two rows of checks along the top and the bottom edge.
+  const sq = 16;
+  for (let col = 0; col < 1024 / sq; col++)
+    for (const row of [0, 1, 6, 7]) {
+      ctx.fillStyle = (col + row) % 2 === 0 ? '#5B4638' : '#FFF3E0';
+      ctx.fillRect(col * sq, row * sq, sq, sq);
+    }
+  ctx.font = '900 60px Nunito, ui-rounded, system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#FF7A70';
+  ctx.fillText('Racing Carts', 512, 66);
+  tex.update();
   return tex;
 }
 
@@ -461,14 +438,15 @@ function buildFlowersAndBushes(track: Track, blocked: readonly Circle[], solid: 
 
 /**
  * All decorations: the start arch, bunting along the start straight, fences on two corners, flowers
- * and bushes. `blocked` is the room the trees and rocks already take. The solid parts are baked into
- * one toon mesh; the banner and the bunting are a mesh each.
+ * and bushes. `scenery` is the room the trees and rocks take: flowers and bushes keep out of it and
+ * out of the fixed decorations. The solid parts are baked into one toon mesh; the banner and the
+ * bunting are a mesh each.
  */
-export function buildDecorations(scene: Scene, track: Track, blocked: readonly Circle[]): void {
+export function buildDecorations(scene: Scene, track: Track, scenery: readonly Circle[]): void {
   const solid: VertexData[] = [];
   buildArch(track, solid, scene);
   buildFences(track, solid);
-  buildFlowersAndBushes(track, blocked, solid);
+  buildFlowersAndBushes(track, [...scenery, ...fixedBlockers(track)], solid);
   bake('decor', solid, scene).material = toonMaterial('decor', '#FFFFFF', scene);
   buildBunting(track, scene);
 }

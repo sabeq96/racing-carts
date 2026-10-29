@@ -17,6 +17,8 @@ import {
   type Circle,
 } from './decor';
 
+import { sceneryLayout } from './scene';
+
 const track = buildTrack(TRACK_V1);
 
 const area: Area = { minX: -50, minZ: 10, sizeX: 200, sizeZ: 100 };
@@ -89,8 +91,8 @@ describe('decorations stay off the track', () => {
     for (const run of runs) {
       for (let i = 0; i < run.length; i++) {
         expect(centreDistance(track, run[i].x, run[i].z)).toBeGreaterThanOrEqual(track.width / 2 + 2);
-        // Evenly spaced along the fence, so every rail is about one step long.
-        if (i > 0) expect(Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z)).toBeLessThan(3.4);
+        // Posts are a step of road apart: further on the outside of a bend, but never a gappy rail.
+        if (i > 0) expect(Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z)).toBeLessThan(3.6);
       }
     }
   });
@@ -107,6 +109,13 @@ describe('decorations stay off the track', () => {
       expect(Math.hypot(c.x - POND.x, c.z - POND.z)).toBeGreaterThan(pondOuter + c.r);
       for (const b of blocked) expect(Math.hypot(c.x - b.x, c.z - b.z)).toBeGreaterThan(b.r + c.r);
     }
+  });
+
+  test('the arch, bunting, fences and pond stand clear of the trees and rocks', () => {
+    const scenery = sceneryLayout(track);
+    expect(scenery).toHaveLength(40);
+    for (const c of fixedBlockers(track))
+      for (const t of scenery) expect(Math.hypot(c.x - t.x, c.z - t.z)).toBeGreaterThan(c.r + t.r);
   });
 
   test('the layout is the same every boot', () => {

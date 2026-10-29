@@ -19,7 +19,7 @@ import { PAD_LENGTH, PAD_WIDTH } from '../race/boostPads';
 import type { Track } from '../track/track';
 import type { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { CLOCK, CLOCK_PERIOD, HORIZON, SUN_DIR, grassMaterial, noiseTexture, padMaterial, roadMaterial, toonMaterial } from './shaders';
-import { buildClouds, buildDecorations, buildPond, fixedBlockers, seeded, type Circle } from './decor';
+import { buildClouds, buildDecorations, buildPond, seeded } from './decor';
 
 export const PALETTE = {
   grass: '#BFE6A6',
@@ -281,29 +281,42 @@ function buildWalls(scene: Scene, track: Track): void {
   });
 }
 
-/**
- * Lollipop trees and rounded rocks scattered off the road and clear of `blocked`, merged per material.
- * Returns the room they take (with `blocked`).
- */
-function buildScenery(scene: Scene, track: Track, blocked: readonly Circle[]): Circle[] {
+/** A tree or rock: where, how big, and the room it takes (r). */
+export interface SceneryItem {
+  x: number;
+  z: number;
+  r: number;
+  size: number;
+  tree: boolean;
+  /** A rock's turn (rad). */
+  turn: number;
+}
+
+/** Where the lollipop trees and rounded rocks stand: seeded, off the road, apart from each other. */
+export function sceneryLayout(track: Track): SceneryItem[] {
   const rand = seeded(SCENERY_SEED);
   const b = track.bounds;
   const pad = GROUND_MARGIN - 4;
   const clear = track.width / 2 + 6;
-  const placed: Circle[] = blocked.slice();
-  const trunks: Mesh[] = [], canopies: Mesh[] = [], rocks: Mesh[] = [], shadows: Mesh[] = [];
-
-  for (let tries = 0; placed.length - blocked.length < SCENERY_COUNT && tries < 4000; tries++) {
+  const placed: SceneryItem[] = [];
+  for (let tries = 0; placed.length < SCENERY_COUNT && tries < 4000; tries++) {
     const x = b.minX - pad + rand() * (b.maxX - b.minX + 2 * pad);
     const z = b.minZ - pad + rand() * (b.maxZ - b.minZ + 2 * pad);
-    const isTree = rand() < 0.7;
+    const tree = rand() < 0.7;
     const size = 0.8 + rand() * 0.6;
-    const r = (isTree ? 2.2 : 2) * size;
+    const r = (tree ? 2.2 : 2) * size;
     if (Math.abs(track.project({ x, z }).lateral) < clear + r * 0.5) continue;
     if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < p.r + r + 2)) continue;
-    placed.push({ x, z, r });
+    placed.push({ x, z, r, size, tree, turn: tree ? 0 : rand() * Math.PI * 2 });
+  }
+  return placed;
+}
 
-    if (isTree) {
+/** Lollipop trees (swaying foliage) and rounded rocks, merged per material. */
+function buildScenery(scene: Scene, items: readonly SceneryItem[]): void {
+  const trunks: Mesh[] = [], canopies: Mesh[] = [], rocks: Mesh[] = [], shadows: Mesh[] = [];
+  for (const { x, z, r, size, tree, turn } of items) {
+    if (tree) {
       const trunkH = 1.6 * size;
       const trunk = CreateCylinder('trunk', { height: trunkH, diameter: 0.6 * size, tessellation: 6 }, scene);
       trunk.position.set(x, trunkH / 2, z);
@@ -314,7 +327,7 @@ function buildScenery(scene: Scene, track: Track, blocked: readonly Circle[]): C
     } else {
       const rock = CreateIcoSphere('rock', { radius: 1.6 * size, subdivisions: 1, flat: true }, scene);
       rock.scaling.set(1.2, 0.7, 1);
-      rock.rotation.y = rand() * Math.PI * 2;
+      rock.rotation.y = turn;
       rock.position.set(x, 0.6 * size, z);
       rocks.push(rock);
     }
@@ -334,7 +347,6 @@ function buildScenery(scene: Scene, track: Track, blocked: readonly Circle[]): C
   const shadowMat = blobShadowMaterial(scene);
   set(shadows, 'sceneryShadows', shadowMat);
   shadowMat.freeze();
-  return placed;
 }
 
 /** Builds the static world: warm lights, haze, grass, road, start stripe, walls and scenery. */
@@ -370,10 +382,10 @@ export function createScene(engine: Engine, track: Track): Scene {
   buildRoad(scene, track, noise);
   buildBoostPads(scene, track);
   buildWalls(scene, track);
-  const fixed = fixedBlockers(track);
-  const taken = buildScenery(scene, track, fixed);
+  const scenery = sceneryLayout(track);
+  buildScenery(scene, scenery);
   buildPond(scene);
-  buildDecorations(scene, track, taken);
+  buildDecorations(scene, track, scenery);
   buildClouds(scene, track);
 
   return scene;
