@@ -31,9 +31,8 @@ export const rocket: PowerupDef = {
     const startD = kart.distance + START_AHEAD;
     const startLateral = track.project(kart.pos, kart.trackIndex).lateral;
     const fx = Math.sin(kart.heading), fz = Math.cos(kart.heading);
-    /** Its own distance along the track (same scale as `kart.distance`) and its lateral offset. */
+    /** Its own distance along the track (same scale as `kart.distance`). */
     let d = startD;
-    let lateral = startLateral;
     let homing = false;
     let age = 0;
     let hint = kart.trackIndex;
@@ -93,7 +92,7 @@ export const rocket: PowerupDef = {
         const left = Math.max(0, target.distance - d);
         const f = flown / (flown + left);
         const targetLateral = track.project(target.pos, target.trackIndex).lateral;
-        lateral = startLateral + (targetLateral - startLateral) * f;
+        const lateral = startLateral + (targetLateral - startLateral) * f;
         const p = track.pointAt(d, lateral);
         this.heading = Math.atan2(p.x - this.pos.x, p.z - this.pos.z);
         this.pos.x = p.x;
