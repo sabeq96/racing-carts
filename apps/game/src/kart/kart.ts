@@ -51,6 +51,8 @@ export interface Kart {
   finishedAt: number | null;
   /** Power slide: BRAKE + steer at speed. `charge` is seconds drifted (pays a mini-turbo on release). */
   drift: { active: boolean; charge: number };
+  /** Seconds spent in another kart's slipstream (see `stepSlipstream`); render shows streaks above 0.2. */
+  draft: number;
 }
 
 export function createKart(id: number, color: string, slot: Track['grid'][number], track: Track): Kart {
@@ -70,6 +72,7 @@ export function createKart(id: number, color: string, slot: Track['grid'][number
     trackIndex: track.project(slot.pos).index,
     finishedAt: null,
     drift: { active: false, charge: 0 },
+    draft: 0,
   };
 }
 

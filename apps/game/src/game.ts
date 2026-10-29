@@ -1,5 +1,6 @@
 import { KART_COLORS, NEUTRAL_INPUT, type InputSnapshot } from '@rc/shared';
 import { createKart, resolveKartCollisions, stepKart, type Kart } from './kart/kart';
+import { stepSlipstream } from './kart/slipstream';
 import { ItemBoxes } from './powerups/itemBoxes';
 import { BoostPads } from './race/boostPads';
 import { handleItemInput } from './powerups/useItem';
@@ -62,7 +63,7 @@ export class Game {
 
   /**
    * One fixed step: inputs → item presses → physics → kart collisions → item boxes → boost pads →
-   * powerup world (entities, effects) → race (progress, laps, phases). Inputs, items included, only count
+   * slipstream → powerup world (entities, effects) → race (progress, laps, phases). Inputs, items included, only count
    * while racing.
    */
   step(dt: number, drivers: (kartId: number) => Driver): RaceEvent[] {
@@ -84,6 +85,7 @@ export class Game {
     const got = this.itemBoxes.update(dt, karts, this.world, this.rand);
     for (const id of got) this.itemGot.push(id);
     this.boostPads.update(dt, karts, this.world);
+    stepSlipstream(karts, this.world, dt);
     this.world.step(dt);
     return this.race.update(dt, karts, this.track, this.isHuman);
   }

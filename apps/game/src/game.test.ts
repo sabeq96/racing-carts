@@ -204,3 +204,22 @@ test('a kart driving over a boost pad in a race step gets the boost and its soun
   expect(g.world.hasEffect(k, 'boost')).toBe(true);
   expect(g.world.drainSfx()).toContain('boost');
 });
+
+test('a kart tucked in behind another during the race builds up draft in the game step', () => {
+  const g = new Game(track);
+  g.setupKarts(2);
+  const d = human(() => gas);
+  toRacing(g, d);
+  const [a, b] = g.karts;
+  for (const [k, s] of [[a, 100], [b, 106]] as const) {
+    k.pos = track.pointAt(s, 0);
+    k.heading = track.headingAt(s);
+    k.trackIndex = track.project(k.pos).index;
+    k.distance = s;
+    k.speed = 15;
+    k.vel = { x: Math.sin(k.heading) * 15, z: Math.cos(k.heading) * 15 };
+  }
+  for (let i = 0; i < 10; i++) g.step(1 / 60, d);
+  expect(a.draft).toBeGreaterThan(0.1);
+  expect(b.draft).toBe(0);
+});

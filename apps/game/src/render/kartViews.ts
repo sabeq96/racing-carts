@@ -9,6 +9,7 @@ import { CreateCapsule } from '@babylonjs/core/Meshes/Builders/capsuleBuilder';
 import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder';
 import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
 import { CreateDisc } from '@babylonjs/core/Meshes/Builders/discBuilder';
+import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';
 import { effectLeft, type Kart } from '../kart/kart';
 import { blobShadowMaterial, matte } from './scene';
 
@@ -26,6 +27,17 @@ const BUBBLE_BLINK = 1;
 /** Boost flame: cone length behind the kart's tail (an inner core is 60 % of it). */
 const FLAME_LEN = 1.7;
 const TAIL_Z = -1.25;
+/** Slipstream: faint white streaks (kart-local x, y) that run from nose to tail while drafting. */
+const STREAKS: readonly (readonly [number, number])[] = [[-1.15, 0.45], [1.15, 0.45], [0, 1.95]];
+const STREAK_LEN = 1.6;
+/** Draft (s) above which the streaks show, and how much more it takes to reach full strength. */
+const STREAK_FROM = 0.2;
+const STREAK_RAMP = 0.3;
+/** Each streak's trip from STREAK_FRONT to STREAK_BACK (kart-local z) takes 1 / STREAK_RATE seconds. */
+const STREAK_RATE = 2.6;
+const STREAK_FRONT = 1.6;
+const STREAK_BACK = -2.8;
+const STREAK_ALPHA = 0.8;
 
 interface View {
   root: TransformNode;
@@ -33,6 +45,7 @@ interface View {
   /** Shield bubble and boost flame, enabled while the effect runs. */
   bubble: Mesh;
   flame: Mesh;
+  streaks: Mesh[];
   lean: number;
   /** Frame number of the last update that saw this kart. */
   seen: number;
@@ -47,6 +60,7 @@ interface Template {
   shadow: Mesh;
   bubble: Mesh;
   flame: Mesh;
+  streak: Mesh;
 }
 
 /** Chunky rounded karts, one cloned mesh group per kart, synced from the simulation each frame. */
@@ -99,6 +113,9 @@ export class KartViews {
     core.material = flameMaterial('kartFlameCore', '#FFF1B8', 1, scene);
     core.isPickable = false;
 
+    const streak = CreateBox('kartStreak', { width: 0.16, height: 0.05, depth: STREAK_LEN }, scene);
+    streak.material = flameMaterial('kartStreak', '#FFFFFF', STREAK_ALPHA, scene);
+
     const dark = matte('kartDark', '#5B4A44', scene);
     const cream = matte('kartCream', '#FFF3E0', scene);
     nose.material = dark;
@@ -108,7 +125,7 @@ export class KartViews {
     shadow.material = shadowMat;
     for (const m of [dark, cream, shadowMat]) m.freeze();
 
-    this.template = { body, nose, head, wheel, shadow, bubble, flame };
+    this.template = { body, nose, head, wheel, shadow, bubble, flame, streak };
     for (const mesh of Object.values(this.template)) {
       mesh.isPickable = false;
       mesh.setEnabled(false);
@@ -150,7 +167,13 @@ export class KartViews {
     bubble.setEnabled(false);
     const flame = part(t.flame, tilt);
     flame.setEnabled(false);
-    return { root, tilt, bubble, flame, lean: 0, seen: this.frame };
+    const streaks = STREAKS.map(([x, y]) => {
+      const m = part(t.streak, root);
+      m.position.set(x, y, 0);
+      m.setEnabled(false);
+      return m;
+    });
+    return { root, tilt, bubble, flame, streaks, lean: 0, seen: this.frame };
   }
 
   /** Shield bubble (gently wobbling, blinking in its last second) and a flickering boost flame. */
@@ -169,6 +192,17 @@ export class KartViews {
       // Scaling y stretches the cone's length (it points backwards); keep its base at the tail.
       v.flame.scaling.set(1, f, 1);
       v.flame.position.z = TAIL_Z - (FLAME_LEN * f) / 2;
+    }
+    // Slipstream: streaks rush past the kart, fading in as the draft builds and at both ends of each trip.
+    const strength = Math.min(1, (k.draft - STREAK_FROM) / STREAK_RAMP);
+    const streaksOn = strength > 0;
+    for (let i = 0; i < v.streaks.length; i++) {
+      const m = v.streaks[i];
+      if (m.isEnabled() !== streaksOn) m.setEnabled(streaksOn);
+      if (!streaksOn) continue;
+      const u = (time * STREAK_RATE + i * 0.37 + k.id * 0.21) % 1;
+      m.position.z = STREAK_FRONT + (STREAK_BACK - STREAK_FRONT) * u;
+      m.visibility = strength * Math.sin(Math.PI * u);
     }
   }
 
