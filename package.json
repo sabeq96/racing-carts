@@ -8,7 +8,8 @@
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build:tv": "npm run build -w game && bash apps/game/scripts/package-tizen.sh"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
