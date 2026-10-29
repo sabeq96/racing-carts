@@ -1,26 +1,16 @@
 import { describe, expect, test } from 'vitest';
 import { KART_COLORS, TOTAL_LAPS } from '@rc/shared';
 import { createKart, resolveKartCollisions, stepKart, type Kart } from '../kart/kart';
+import { wrapAngle } from '../math/vec2';
 import { MAX_SPEED } from '../kart/tuning';
 import { lapOf, updateProgress } from '../race/progress';
 import { buildTrack } from '../track/track';
 import { TRACK_V1 } from '../track/trackDef';
 import { botInput, createBotBrain, type BotBrain } from './bot';
+import { mulberry32 } from '../test/rand';
 
 const track = buildTrack(TRACK_V1);
 const DT = 1 / 60;
-
-/** Small deterministic PRNG so every run drives the same. */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 describe('createBotBrain', () => {
   test('values stay inside the relaxed ranges', () => {
@@ -138,16 +128,48 @@ describe('botInput', () => {
       const done: (number | null)[] = karts.map(() => null);
       const goal = TOTAL_LAPS * track.length;
       let t = 0;
+      let minSpeed = Infinity; // slowest any kart gets after the opening 8 s
       while (t < 180 && done.some((d) => d === null)) {
         karts.forEach((k, i) => stepKart(k, botInput(brains[i], k, track, DT, rand), track, DT));
         resolveKartCollisions(karts);
         t += DT;
         karts.forEach((k, i) => {
           updateProgress(k, track);
+          if (t > 8) minSpeed = Math.min(minSpeed, k.speed);
           if (done[i] === null && k.distance >= goal) done[i] = t;
         });
       }
       expect(done.every((d) => d !== null)).toBe(true);
+      expect(minSpeed).toBeGreaterThanOrEqual(8);
+    });
+  }
+});
+
+describe('recovery from a bad pose', () => {
+  const S = 20; // on the straight after the start line
+  const cases: [string, number, number][] = [
+    ['facing backwards', 0, Math.PI],
+    ['at the right wall, facing it', 5, Math.PI / 2],
+    ['at the left wall, facing it', -5, -Math.PI / 2],
+  ];
+  for (const [name, lateral, turn] of cases) {
+    test(`a stopped kart ${name} gets going again and lines up with the track`, () => {
+      const rand = mulberry32(9);
+      const b = createBotBrain(rand);
+      const k = createKart(0, KART_COLORS[0], track.grid[0], track);
+      k.pos = track.pointAt(S, lateral);
+      k.heading = track.headingAt(S) + turn;
+      k.speed = 0;
+      k.trackIndex = track.project(k.pos).index;
+      k.distance = S;
+      for (let i = 0; i < 60 * 5; i++) {
+        stepKart(k, botInput(b, k, track, DT, rand), track, DT);
+        updateProgress(k, track);
+      }
+      const pr = track.project(k.pos, k.trackIndex);
+      expect(k.speed).toBeGreaterThan(10);
+      expect(Math.abs(wrapAngle(k.heading - track.headingAt(pr.s)))).toBeLessThan(0.5);
+      expect(k.distance).toBeGreaterThan(S);
     });
   }
 });
