@@ -12,26 +12,31 @@ export const DRAFT_BOOST = 0.8;
 const DRAFT_DECAY = 2;
 const EPS = 1e-9;
 
-type SlipWorld = Pick<WorldApi, 'track' | 'kartAhead' | 'applyEffect' | 'sfx'>;
+type SlipWorld = Pick<WorldApi, 'applyEffect' | 'sfx'>;
 
-/** Whether `k` sits in the slipstream of the next kart still racing ahead of it. */
-function inSlipstream(k: Kart, world: SlipWorld): boolean {
-  if (k.finishedAt !== null || k.speed <= DRAFT_MIN_SPEED) return false;
-  const ahead = world.kartAhead(k); // unfinished karts only
+/** Whether the kart at race position `r` sits in the slipstream of the next kart still racing ahead of it. */
+function inSlipstream(ranked: readonly Kart[], r: number): boolean {
+  const k = ranked[r];
+  if (k.speed <= DRAFT_MIN_SPEED) return false;
+  // `kartAhead` semantics: finished karts rank first but are out of the race, so skip them.
+  let ahead: Kart | null = null;
+  for (let i = r - 1; i >= 0 && !ahead; i--) if (ranked[i].finishedAt === null) ahead = ranked[i];
   if (!ahead || ahead.speed <= DRAFT_MIN_SPEED) return false;
   const gap = ahead.distance - k.distance;
   if (gap < DRAFT_MIN_GAP || gap > DRAFT_MAX_GAP) return false;
-  const track = world.track;
-  const side = track.project(ahead.pos, ahead.trackIndex).lateral - track.project(k.pos, k.trackIndex).lateral;
-  return Math.abs(side) < DRAFT_LATERAL;
+  return Math.abs(ahead.lateral - k.lateral) < DRAFT_LATERAL;
 }
 
-/** Charges each kart's `draft` while it tucks in behind the kart ahead; a full draft pays a short boost. */
-export function stepSlipstream(karts: Kart[], world: SlipWorld, dt: number): void {
-  for (const k of karts) {
+/**
+ * Charges each kart's `draft` while it tucks in behind the kart ahead; a full draft pays a short boost.
+ * `ranked` is every kart in race order (`compareRank`), so nothing is sorted or projected here.
+ */
+export function stepSlipstream(ranked: readonly Kart[], world: SlipWorld, dt: number): void {
+  for (let r = 0; r < ranked.length; r++) {
+    const k = ranked[r];
     if (k.finishedAt !== null) {
       k.draft = 0;
-    } else if (inSlipstream(k, world)) {
+    } else if (inSlipstream(ranked, r)) {
       k.draft += dt;
       if (k.draft >= DRAFT_TIME - EPS) {
         world.applyEffect(k, 'boost', DRAFT_BOOST);

@@ -49,6 +49,8 @@ export interface Kart {
   itemPressed: boolean;
   distance: number;
   trackIndex: number;
+  /** Signed offset from the centre line (m, right positive) as of the latest physics step. */
+  lateral: number;
   finishedAt: number | null;
   /** Power slide: BRAKE + steer at speed. `charge` is seconds drifted (pays a mini-turbo on release). */
   drift: { active: boolean; charge: number };
@@ -59,6 +61,7 @@ export interface Kart {
 }
 
 export function createKart(id: number, color: string, slot: Track['grid'][number], track: Track): Kart {
+  const pr = track.project(slot.pos);
   return {
     id,
     color,
@@ -72,7 +75,8 @@ export function createKart(id: number, color: string, slot: Track['grid'][number
     rolling: null,
     itemPressed: false,
     distance: slot.s,
-    trackIndex: track.project(slot.pos).index,
+    trackIndex: pr.index,
+    lateral: pr.lateral,
     finishedAt: null,
     drift: { active: false, charge: 0 },
     sinceWall: CATCHUP_WALL_PAUSE,
@@ -181,6 +185,7 @@ export function stepKart(
   const limit = track.width / 2 - KART_RADIUS;
   const pr = track.project(k.pos, k.trackIndex);
   k.trackIndex = pr.index;
+  k.lateral = pr.lateral;
   if (Math.abs(pr.lateral) <= limit) {
     k.sinceWall += dt;
     return { hitWall: false };
@@ -191,6 +196,7 @@ export function stepKart(
   const rx = Math.cos(h), rz = -Math.sin(h); // right of the track direction
   const side = Math.sign(pr.lateral);
   const push = side * limit - pr.lateral;
+  k.lateral = side * limit;
   k.pos.x += rx * push;
   k.pos.z += rz * push;
   const vLat = k.vel.x * rx + k.vel.z * rz;

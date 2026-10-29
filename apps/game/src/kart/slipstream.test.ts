@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { KART_COLORS } from '@rc/shared';
 import { createWorld } from '../powerups/world';
+import { rankKarts } from '../race/progress';
 import { buildTrack } from '../track/track';
 import { TRACK_V1 } from '../track/trackDef';
 import { createKart, effectLeft, type Kart } from './kart';
@@ -15,6 +16,7 @@ function kart(id: number, s: number, lateral: number, speed: number): Kart {
   k.pos = track.pointAt(s, lateral);
   k.heading = track.headingAt(s);
   k.trackIndex = track.project(k.pos).index;
+  k.lateral = lateral;
   k.distance = s;
   k.speed = speed;
   return k;
@@ -28,9 +30,14 @@ function pair(gap: number, lateral = 0, speed = 15, leaderSpeed = 15) {
   return { follower, leader, karts, world: createWorld(karts, track) };
 }
 
+/** One slipstream step over `karts` in race order, as Game does. */
+function slip(karts: Kart[], world: ReturnType<typeof createWorld>): void {
+  stepSlipstream(rankKarts(karts), world, DT);
+}
+
 const drafts = (gap: number, lateral = 0, speed = 15, leaderSpeed = 15): boolean => {
   const p = pair(gap, lateral, speed, leaderSpeed);
-  stepSlipstream(p.karts, p.world, DT);
+  slip(p.karts, p.world);
   return p.follower.draft > 0;
 };
 
@@ -55,7 +62,7 @@ describe('slipstream', () => {
 
   test('the leader never drafts (nobody ahead)', () => {
     const p = pair(6);
-    stepSlipstream(p.karts, p.world, DT);
+    slip(p.karts, p.world);
     expect(p.leader.draft).toBe(0);
   });
 
@@ -63,11 +70,11 @@ describe('slipstream', () => {
     expect(DRAFT_TIME).toBe(1);
     expect(DRAFT_BOOST).toBe(0.8);
     const p = pair(6);
-    for (let i = 0; i < 59; i++) stepSlipstream(p.karts, p.world, DT);
+    for (let i = 0; i < 59; i++) slip(p.karts, p.world);
     expect(p.follower.draft).toBeGreaterThan(0.95);
     expect(effectLeft(p.follower, 'boost')).toBe(0);
     expect(p.world.drainSfx()).toEqual([]);
-    stepSlipstream(p.karts, p.world, DT);
+    slip(p.karts, p.world);
     expect(effectLeft(p.follower, 'boost')).toBeCloseTo(0.8, 9);
     expect(p.world.drainSfx()).toEqual(['boost']);
     expect(p.follower.draft).toBe(0);
@@ -77,23 +84,23 @@ describe('slipstream', () => {
     const p = pair(6);
     p.follower.draft = 0.5;
     p.leader.distance = S + 20;
-    for (let i = 0; i < 6; i++) stepSlipstream(p.karts, p.world, DT);
+    for (let i = 0; i < 6; i++) slip(p.karts, p.world);
     expect(p.follower.draft).toBeCloseTo(0.3, 9);
-    for (let i = 0; i < 60; i++) stepSlipstream(p.karts, p.world, DT);
+    for (let i = 0; i < 60; i++) slip(p.karts, p.world);
     expect(p.follower.draft).toBe(0);
   });
 
   test('finished karts are ignored: no drafting behind one, and a finished kart never drafts', () => {
     const p = pair(6);
     p.leader.finishedAt = 30;
-    stepSlipstream(p.karts, p.world, DT);
+    slip(p.karts, p.world);
     expect(p.follower.draft).toBe(0);
 
     const q = pair(6);
     q.follower.finishedAt = 31;
     q.leader.finishedAt = 30;
     q.follower.draft = 0.4;
-    stepSlipstream(q.karts, q.world, DT);
+    slip(q.karts, q.world);
     expect(q.follower.draft).toBe(0);
   });
 
@@ -103,7 +110,7 @@ describe('slipstream', () => {
     done.finishedAt = 20; // ranks first, out of the race
     const karts = [p.follower, p.leader, done];
     const world = createWorld(karts, track);
-    stepSlipstream(karts, world, DT);
+    slip(karts, world);
     expect(p.follower.draft).toBeGreaterThan(0);
   });
 });

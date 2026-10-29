@@ -163,6 +163,15 @@ describe('kart physics', () => {
     expect(k.trackIndex).toBe(track.project(track.grid[0].pos).index);
   });
 
+  test('lateral follows the kart each step, and sits at the wall limit while touching it', () => {
+    const k = freshKart();
+    expect(k.lateral).toBeCloseTo(-3, 6); // grid slot 0 is 3 m left of the centre line
+    run(k, gas, 0.5);
+    expect(k.lateral).toBeCloseTo(track.project(k.pos, k.trackIndex).lateral, 9);
+    const { kart } = graze(0.2);
+    expect(kart.lateral).toBe(6 - KART_RADIUS);
+  });
+
   /** A kart on the right wall at 15 m/s, re-aimed ~3° into it every step (a player leaning on the wall). */
   function graze(seconds: number): { kart: Kart; contacts: number; steps: number } {
     const k = freshKart();

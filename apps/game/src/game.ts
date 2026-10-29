@@ -35,7 +35,7 @@ export class Game {
   private readonly isHuman = (id: number): boolean => this.humanIds.indexOf(id) >= 0;
   /** Each kart's input for the current step, reused. */
   private inputs: InputSnapshot[] = [];
-  /** Each kart's catch-up top speed scale for the current step, and the race order it comes from (reused). */
+  /** Each kart's catch-up top speed scale for the current step, and the race order of this step (reused). */
   private topScale: number[] = [];
   private ranked: Kart[] = [];
   private rankCtx: RollContext = { position: 1, racerCount: 1 };
@@ -86,6 +86,7 @@ export class Game {
       inputs[i] = racing ? driver.input() : NEUTRAL_INPUT;
     }
     for (let i = 0; i < karts.length; i++) handleItemInput(karts[i], inputs[i].item, this.world);
+    this.rankKarts();
     this.updateCatchUp(racing);
     for (let i = 0; i < karts.length; i++) {
       if (stepKart(karts[i], inputs[i], this.track, dt, this.topScale[i]).hitWall) this.wallHits.push(karts[i].id);
@@ -94,9 +95,24 @@ export class Game {
     const got = this.itemBoxes.update(dt, karts, this.world, this.rand);
     for (const id of got) this.itemGot.push(id);
     this.boostPads.update(dt, karts, this.world);
-    stepSlipstream(karts, this.world, dt);
+    stepSlipstream(this.ranked, this.world, dt); // distances only change in the race step: still in order
     this.world.step(dt);
     return this.race.update(dt, karts, this.track, this.isHuman);
+  }
+
+  /** Rebuilds `ranked` in race order (`compareRank`) with an insertion sort: a handful of karts, no temporary arrays. */
+  private rankKarts(): void {
+    const ranked = this.ranked;
+    ranked.length = 0;
+    for (const k of this.karts) {
+      let j = ranked.length;
+      ranked.push(k);
+      while (j > 0 && compareRank(ranked[j - 1], k) > 0) {
+        ranked[j] = ranked[j - 1];
+        j--;
+      }
+      ranked[j] = k;
+    }
   }
 
   /**
@@ -109,18 +125,7 @@ export class Game {
     scale.length = karts.length;
     for (let i = 0; i < karts.length; i++) scale[i] = 1;
     if (!racing) return;
-    // Insertion sort into race order: a handful of karts, and no temporary arrays.
     const ranked = this.ranked;
-    ranked.length = 0;
-    for (const k of karts) {
-      let j = ranked.length;
-      ranked.push(k);
-      while (j > 0 && compareRank(ranked[j - 1], k) > 0) {
-        ranked[j] = ranked[j - 1];
-        j--;
-      }
-      ranked[j] = k;
-    }
     const ctx = this.rankCtx;
     ctx.racerCount = ranked.length;
     for (let r = 0; r < ranked.length; r++) {
