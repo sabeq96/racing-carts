@@ -8,7 +8,7 @@ test('makeRoomCode uses 4 unambiguous letters', () => {
 });
 test('peerIdFor / controllerUrl', () => {
   expect(peerIdFor('kart')).toBe('racingcarts-KART');
-  expect(controllerUrl('KART')).toBe('https://sabeq96.github.io/racing-carts/?address=KART');
+  expect(controllerUrl('KART')).toBe('https://sabeq96.github.io/racing-carts/controller/?address=KART');
 });
 test('decodeClient accepts valid messages and JSON strings', () => {
   expect(decodeClient({ t: 'start' })).toEqual({ t: 'start' });

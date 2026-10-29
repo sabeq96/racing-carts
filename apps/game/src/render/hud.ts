@@ -97,7 +97,7 @@ function qrImage(placeholderPx: number, radius: number): { qr: HTMLImageElement;
   return { qr, spot };
 }
 
-/** The short controller address without scheme or trailing slash, e.g. `sabeq96.github.io/racing-carts`. */
+/** The short controller address without scheme or trailing slash, e.g. `sabeq96.github.io/racing-carts/controller`. */
 const shortUrl = (url: string): string => url.replace(/^https?:\/\//, '').replace(/\/$/, '');
 
 function sameRows(a: readonly RaceRow[], b: readonly RaceRow[]): boolean {

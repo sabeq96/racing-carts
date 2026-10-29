@@ -127,4 +127,4 @@ Free GitHub Pages needs a **public** repository; Pages from a private repository
 
 1. Make sure a `main` branch exists with this code.
 2. Go to **Settings > Pages** and set **Source** to **GitHub Actions**.
-3. After the first run, the controller is live at `https://sabeq96.github.io/racing-carts/`, which is the address the QR code points to.
+3. After the first run, the game is live at `https://sabeq96.github.io/racing-carts/` and the controller at `https://sabeq96.github.io/racing-carts/controller/`, which is the address the QR code points to.

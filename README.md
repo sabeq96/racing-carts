@@ -6,7 +6,7 @@ A cozy couch kart game. The **TV** (a Samsung Tizen TV, or any browser) runs the
 ## Play
 
 1. Open Racing Carts on the TV. It shows a room code and a QR code.
-2. Each player scans the QR (or opens `https://sabeq96.github.io/racing-carts/?address=CODE`), types a name and taps **Tap to start** (allow motion access if the phone asks).
+2. Each player scans the QR (or opens `https://sabeq96.github.io/racing-carts/controller/?address=CODE`), types a name and taps **Tap to start** (allow motion access if the phone asks).
 3. The first phone to join is the host and taps **Start race**.
 4. Hold the phone sideways and **tilt to steer**. Hold **GAS**, tap **ITEM** to use what you picked up, hold **BRAKE** to slow down or reverse. **Center** resets "straight ahead".
 5. After 3 laps, the host taps **Rematch**.
@@ -21,7 +21,7 @@ npm run typecheck
 
 ```bash
 npm run dev -w game          # open the printed URL with ?keyboard=1&bots=5, press Enter to race
-npm run dev -w controller    # the phone page, at /racing-carts/ (add ?demo=1, ?demo=lobby or ?demo=results to preview)
+npm run dev -w controller    # the phone page, at /racing-carts/controller/ (add ?demo=1, ?demo=lobby or ?demo=results to preview)
 ```
 
 TV URL flags:
@@ -55,8 +55,8 @@ Then create `main` from this branch and push it:
 git checkout -b main && git push -u origin main
 ```
 
-Every push or merge to `main` deploys the controller (watch the **Actions** tab; it can also be run by hand there).
-Then check that `https://sabeq96.github.io/racing-carts/?address=TEST` opens the join screen.
+Every push or merge to `main` deploys the game and the controller (watch the **Actions** tab; it can also be run by hand there).
+Then check that `https://sabeq96.github.io/racing-carts/controller/?address=TEST` opens the join screen.
 
 ## First couch test
 

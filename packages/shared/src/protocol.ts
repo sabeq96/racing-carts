@@ -12,7 +12,7 @@ export const KART_COLORS: readonly string[] = [
   '#C9B6F2',
   '#FFC09F',
 ];
-export const CONTROLLER_URL = 'https://sabeq96.github.io/racing-carts/';
+export const CONTROLLER_URL = 'https://sabeq96.github.io/racing-carts/controller/';
 
 export type Phase = 'lobby' | 'countdown' | 'racing' | 'results';
 
