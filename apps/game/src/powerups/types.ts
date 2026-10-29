@@ -9,9 +9,11 @@ export interface RollContext {
 }
 
 /**
- * How render draws an entity: a simple pastel shape `size` metres across, its centre at height `y`
- * (default size/2). `height` overrides the vertical size for a non-uniform shape, e.g. a `disc` is a flat
- * cylinder `size` across and `height` thick (a puddle, a pad).
+ * How render draws an entity (generically, no per-item render code): a simple pastel shape `size` metres
+ * across, its centre at height `y` (default: resting on the ground), turned to `heading`.
+ * - `sphere`, `box`: `size` across; `height` overrides the vertical size.
+ * - `disc`: a flat cylinder `size` across and `height` thick (default 0.1): a puddle, a pad.
+ * - `cone`: lying down, nose pointing along `heading`, `size` across at the base and 2 × `size` long.
  */
 export interface EntityLook {
   shape: 'sphere' | 'cone' | 'box' | 'disc';
@@ -19,7 +21,12 @@ export interface EntityLook {
   size: number;
   height?: number;
   y?: number;
+  /** Turns slowly in place instead of facing `heading`. */
   spin?: boolean;
+  /** Colour of a small dot on top (a bomb's fuse, a button). */
+  accent?: string;
+  /** Colour of a short glowing puff behind it (opposite `heading`), for things that fly. */
+  trail?: string;
 }
 
 /** Something an item left on the track (a mine, a rocket...). The world updates it every step. */

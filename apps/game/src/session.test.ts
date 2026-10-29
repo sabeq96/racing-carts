@@ -29,7 +29,8 @@ const gasOnly: InputSnapshot = { steer: 0, gas: true, brake: false, item: false 
 let clock = 0;
 
 function setup(maxBots = 6, keyboard?: { input(): InputSnapshot }) {
-  const game = new Game(track);
+  // Seeded item rolls too, so bots fire the same mines and rockets every run.
+  const game = new Game(track, mulberry32(7));
   const registry = new PlayerRegistry();
   const session = new Session(game, registry, send, { maxBots, keyboard, now: () => clock, rand: mulberry32(42) });
   return { game, registry, session };
@@ -401,10 +402,14 @@ test('bots drive: empty slots and a dropped player\'s kart advance on their own 
   session.onDisconnect('b');
   const start = game.karts.map((k) => k.distance);
   stepFor(game, session, 60 * 12);
-  for (const id of [1, 2, 3]) {
-    expect(game.karts[id].distance - start[id], `kart ${id}`).toBeGreaterThan(100);
-    expect(game.karts[id].speed, `kart ${id}`).toBeGreaterThan(8);
+  for (const id of [1, 2, 3]) expect(game.karts[id].distance - start[id], `kart ${id}`).toBeGreaterThan(100);
+  // Still driving: each bot is at speed within the next 3 s (a mine or rocket may have just spun it).
+  const atSpeed = new Set<number>();
+  for (let i = 0; i < 180 && atSpeed.size < 3; i++) {
+    for (const id of [1, 2, 3]) if (game.karts[id].speed > 8) atSpeed.add(id);
+    stepFor(game, session, 1);
   }
+  expect([...atSpeed].sort()).toEqual([1, 2, 3]);
   // Ada is a human sending nothing: no bot drives her kart (bumps from passing bots may nudge it).
   expect(session.driverFor(0)).toMatchObject({ kind: 'human' });
   expect(session.driverFor(0).input()).toEqual(NEUTRAL_INPUT);

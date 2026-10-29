@@ -56,13 +56,16 @@ describe('rollItem', () => {
     };
     const leader = count(1);
     const last = count(6);
-    // Leader: shield 3 vs boost 1 → ~75 % shield. Last: shield 1 vs boost 4 → ~80 % boost.
-    expect(leader.shield).toBeGreaterThan(1350);
-    expect(leader.shield).toBeLessThan(1650);
-    expect(last.boost).toBeGreaterThan(1450);
-    expect(last.boost).toBeLessThan(1750);
+    // Leader: shield 3, mine 3, boost 1, rocket 0.5 → ~80 % shield or mine.
+    // Last: shield 1, mine 1, boost 4, rocket 3.5 → ~79 % boost or rocket.
+    expect(leader.shield + leader.mine).toBeGreaterThan(1500);
+    expect(leader.shield + leader.mine).toBeLessThan(1700);
+    expect(last.boost + last.rocket).toBeGreaterThan(1480);
+    expect(last.boost + last.rocket).toBeLessThan(1680);
     expect(leader.shield).toBeGreaterThan(last.shield);
+    expect(leader.mine).toBeGreaterThan(last.mine);
     expect(last.boost).toBeGreaterThan(leader.boost);
+    expect(last.rocket).toBeGreaterThan(leader.rocket);
   });
 
   test('rollItem rand=0 picks first def with weight>0', () => {
@@ -93,7 +96,7 @@ describe('rollItem', () => {
     expect(shield.weight({ position: 6, racerCount: 6 })).toBe(1);
     expect(boost.weight({ position: 1, racerCount: 6 })).toBe(1);
     expect(boost.weight({ position: 6, racerCount: 6 })).toBe(4);
-    expect(POWERUPS.map((d) => d.id)).toEqual(['shield', 'boost']);
+    expect(POWERUPS.map((d) => d.id)).toEqual(['shield', 'boost', 'mine', 'rocket']);
     expect(getPowerup('nope')).toBeUndefined();
   });
 });
@@ -189,13 +192,13 @@ describe('item boxes', () => {
     expect(karts[1].rolling).toBeNull();
   });
 
-  test('the roll uses the kart race position (leader rolls mostly shields)', () => {
+  test('the roll uses the kart race position (leader rolls mostly shields and mines)', () => {
     const karts = mkKarts(6);
     const world = createWorld(karts, track);
     const rand = mulberry32(77);
     karts.forEach((k, i) => placeAt(k, 100 - i * 10));
     const leader = karts[0];
-    let shields = 0;
+    let front = 0;
     for (let i = 0; i < 400; i++) {
       const boxes = new ItemBoxes(track);
       leader.rolling = null;
@@ -204,10 +207,10 @@ describe('item boxes', () => {
       leader.pos = { ...boxes.boxes[0].pos };
       boxes.update(DT, karts, world, rand);
       const roll = leader.rolling as Kart['rolling']; // TS narrowed it to null above
-      if (roll?.item === 'shield') shields++;
+      if (roll?.item === 'shield' || roll?.item === 'mine') front++;
       leader.pos = keep;
     }
-    expect(shields).toBeGreaterThan(250);
+    expect(front).toBeGreaterThan(280);
   });
 });
 

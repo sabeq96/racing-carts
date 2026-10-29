@@ -48,6 +48,8 @@ function runGame(root: HTMLElement): void {
   const maxBots = Number.isFinite(botsParam) ? Math.max(0, Math.min(MAX_PLAYERS, botsParam)) : MAX_PLAYERS;
   // Antialiasing is on unless `?aa=0` (an escape hatch if the TV GPU struggles).
   const antialias = params.get('aa') !== '0';
+  // DEV ONLY (screenshots): `?keyboard=1&give=<item id>` hands the keyboard kart that item at GO.
+  const giveItem = keyboardOn ? params.get('give') : null;
 
   let engine: Engine;
   try {
@@ -170,7 +172,14 @@ function runGame(root: HTMLElement): void {
     stepper.advance(dt, (h) => {
       for (const e of game.step(h, drivers)) {
         if (e.kind === 'countdown') hud.countdown(e.n);
-        else if (e.kind === 'go') hud.countdown('GO');
+        else if (e.kind === 'go') {
+          hud.countdown('GO');
+          if (giveItem && getPowerup(giveItem)) {
+            // DEV ONLY: see `?give` above.
+            const slot = registry.byToken(KEYBOARD_TOKEN)?.slot;
+            for (const k of game.karts) if (k.id === slot) k.item = giveItem;
+          }
+        }
         else if (e.kind === 'finish') session.sendEvent(e.kartId, 'finish');
         else if (e.kind === 'results') showResults();
       }
@@ -181,7 +190,7 @@ function runGame(root: HTMLElement): void {
     if (phase === 'countdown' || phase === 'racing') hud.race(rowsFor());
 
     views.update(game.karts);
-    entities.update(game.itemBoxes, Math.min(0.1, dt));
+    entities.update(game.itemBoxes, game.world.entities, Math.min(0.1, dt));
     const humanIds = game.humanKartIds();
     framed.length = 0;
     // Lobby: the whole track (no points); then the camera eases in on the humans' karts.
