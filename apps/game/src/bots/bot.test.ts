@@ -146,6 +146,29 @@ describe('botInput', () => {
   }
 });
 
+describe('steering matters', () => {
+  /** Seconds a lone kart needs for TOTAL_LAPS laps on TRACK_V1 (Infinity if it never gets there in 3 min). */
+  function lapTime(drive: (k: Kart) => { steer: number; gas: boolean; brake: boolean; item: boolean }): number {
+    const k = createKart(0, KART_COLORS[0], track.grid[0], track);
+    const goal = TOTAL_LAPS * track.length;
+    for (let t = 0; t < 180; t += DT) {
+      stepKart(k, drive(k), track, DT);
+      updateProgress(k, track);
+      if (k.distance >= goal) return t;
+    }
+    return Infinity;
+  }
+
+  test('a GAS-only kart (no steering, riding the walls) is slower over 3 laps than the slowest bot', () => {
+    const rand = mulberry32(13);
+    const brain: BotBrain = { ...createBotBrain(rand), speedFactor: 0.82 };
+    const bot = lapTime((k) => botInput(brain, k, track, DT, rand));
+    const gasOnly = lapTime(() => ({ steer: 0, gas: true, brake: false, item: false }));
+    expect(bot).toBeLessThan(180);
+    expect(gasOnly).toBeGreaterThan(bot);
+  });
+});
+
 describe('recovery from a bad pose', () => {
   const S = 20; // on the straight after the start line
   const cases: [string, number, number][] = [

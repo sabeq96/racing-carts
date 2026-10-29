@@ -121,20 +121,38 @@ describe('kart physics', () => {
     expect(k.trackIndex).toBe(track.project(track.grid[0].pos).index);
   });
 
-  test('shallow wall scrape with gas keeps speed (soft walls)', () => {
+  /** A kart on the right wall at 15 m/s, re-aimed ~3° into it every step (a player leaning on the wall). */
+  function graze(seconds: number): { kart: Kart; contacts: number; steps: number } {
     const k = freshKart();
     const s = 50;
-    k.pos = track.pointAt(s, 4.9);
-    k.heading = track.headingAt(s) + (3 * Math.PI) / 180; // ~3 degrees into the right wall
+    const into = (3 * Math.PI) / 180;
+    k.pos = track.pointAt(s, 5);
+    k.heading = track.headingAt(s) + into;
     k.speed = 15;
     k.vel = { x: Math.sin(k.heading) * 15, z: Math.cos(k.heading) * 15 };
     k.trackIndex = track.project(k.pos).index;
-    let minSpeed = Infinity;
-    run(k, gas, 2, () => {
-      minSpeed = Math.min(minSpeed, k.speed);
-    });
-    expect(k.speed).toBeGreaterThan(12);
-    expect(minSpeed).toBeGreaterThan(12);
+    const steps = Math.round(seconds / DT);
+    let contacts = 0;
+    for (let i = 0; i < steps; i++) {
+      stepKart(k, gas, track, DT);
+      const pr = track.project(k.pos, k.trackIndex);
+      if (Math.abs(pr.lateral) >= 6 - KART_RADIUS - 0.1) contacts++; // within 10 cm: on the wall
+      k.heading = track.headingAt(pr.s) + into;
+    }
+    return { kart: k, contacts, steps };
+  }
+
+  test('brief graze (0.2 s along the wall) loses < 30% of its speed', () => {
+    const { kart, contacts, steps } = graze(0.2);
+    expect(contacts).toBe(steps); // touching the wall the whole time
+    expect(kart.speed).toBeGreaterThan(15 * 0.7);
+    expect(kart.speed).toBeLessThan(15); // but the scrape does cost something, even with gas held
+  });
+
+  test('riding a wall with gas held settles near half top speed (no guide rails)', () => {
+    const { kart, contacts, steps } = graze(2);
+    expect(contacts).toBe(steps);
+    expect(kart.speed).toBeLessThan(MAX_SPEED * 0.55);
   });
 
   test('perpendicular wall hit at 15 m/s loses about 20% and reports hitWall', () => {

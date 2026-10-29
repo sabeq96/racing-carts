@@ -9,5 +9,7 @@ export const GRIP = 6;
 export const KART_RADIUS = 1;
 export const WALL_RESTITUTION = 0.3;
 export const WALL_SPEED_KEEP = 0.8;
+/** Extra speed lost per second while touching a wall, so riding the walls never beats steering (a 0.3 s brush costs ~30%). */
+export const WALL_SCRAPE = 1.2;
 export const SPIN_TIME = 1.2;
 export const BOOST_FACTOR = 1.6;

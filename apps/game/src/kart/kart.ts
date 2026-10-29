@@ -12,6 +12,7 @@ import {
   REVERSE_MAX,
   STEER_RATE,
   WALL_RESTITUTION,
+  WALL_SCRAPE,
   WALL_SPEED_KEEP,
 } from './tuning';
 
@@ -122,6 +123,8 @@ export function stepKart(k: Kart, input: InputSnapshot, track: Track, dt: number
   }
   // Soft walls: speed loss and bump scale with impact; a scrape costs almost nothing.
   k.speed *= 1 - (1 - WALL_SPEED_KEEP) * f * f;
+  // Scraping along a wall drags every step it lasts, so the walls are no guide rail.
+  k.speed *= 1 - WALL_SCRAPE * dt;
   k.heading -= side * Math.min(0.3, f * 0.5);
   return { hitWall: vIn > 0.5 };
 }
