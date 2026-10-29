@@ -30,6 +30,8 @@ function keyOf(e: KeyboardEvent): string {
 /** Desktop driving: arrows/WASD steer, gas and brake; Space uses the item; Enter starts or rematches. */
 export function createKeyboard(target: Window = window): { input(): InputSnapshot; onEnter(cb: () => void): void } {
   const down = new Set<string>();
+  /** Set on an item keydown and cleared by the next `input()`, so a tap between two steps is not lost. */
+  let itemLatch = false;
   const enterListeners: (() => void)[] = [];
   const any = (keys: string[]) => keys.some((k) => down.has(k));
 
@@ -41,6 +43,7 @@ export function createKeyboard(target: Window = window): { input(): InputSnapsho
       if (!e.repeat) for (const cb of enterListeners) cb();
       return;
     }
+    if (ITEM.includes(key)) itemLatch = true;
     down.add(key);
   });
   target.addEventListener('keyup', (e) => {
@@ -57,12 +60,15 @@ export function createKeyboard(target: Window = window): { input(): InputSnapsho
   target.document.addEventListener('visibilitychange', () => down.clear());
 
   return {
+    /** Called once per fixed step. `item` is held, or pressed at any moment since the last call. */
     input(): InputSnapshot {
+      const item = any(ITEM) || itemLatch;
+      itemLatch = false;
       return {
         steer: (any(RIGHT) ? 1 : 0) - (any(LEFT) ? 1 : 0),
         gas: any(GAS),
         brake: any(BRAKE),
-        item: any(ITEM),
+        item,
       };
     },
     onEnter(cb: () => void): void {

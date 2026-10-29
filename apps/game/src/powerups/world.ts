@@ -10,14 +10,13 @@ export interface World extends WorldApi {
   /** Entity updates, entity↔kart contacts (dist < hitRadius + KART_RADIUS), dead entities dropped, effects ticked. */
   step(dt: number): void;
   /** Sound names queued since the last drain. */
-  drainSfx(): string[];
+  drainSfx(): readonly string[];
   /** Ids of karts hit (not shielded) since the last drain. */
-  drainHits(): number[];
+  drainHits(): readonly number[];
 }
 
-/** Returned by the drains when nothing happened, so a quiet frame allocates nothing. Never mutated. */
-const NONE: string[] & number[] = [];
-Object.freeze(NONE);
+/** Returned by the drains when nothing happened, so a quiet frame allocates nothing. */
+const NONE: readonly never[] = Object.freeze([]);
 /** Rounding slack, so 60 steps of 1/60 s finish a 1 s timer in exactly 60 steps. */
 const EPS = 1e-9;
 

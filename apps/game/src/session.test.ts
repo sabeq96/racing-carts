@@ -491,3 +491,44 @@ test('bots pick up and use items during a race', () => {
   expect(got).toBeGreaterThan(3);
   expect(used.filter((s) => s === 'boost' || s === 'shield_up').length).toBeGreaterThan(3);
 });
+
+test('a phone tap shorter than a step (item on, then off, before the step) still fires once', () => {
+  const { game, session } = setup(1);
+  session.onHello('a', 'Ada');
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  const k = game.karts[0];
+  k.item = 'boost';
+  session.onMessage('a', { t: 'input', steer: 0, gas: true, brake: false, item: true });
+  session.onMessage('a', { t: 'input', steer: 0, gas: true, brake: false, item: false });
+  stepFor(game, session, 1);
+  // Rising edge seen: the boost fired and the button reads as pressed.
+  expect(k.item).toBeNull();
+  expect(game.world.hasEffect(k, 'boost')).toBe(true);
+  expect(k.itemPressed).toBe(true);
+  // The next step sees the real level again: released (the falling edge).
+  stepFor(game, session, 1);
+  expect(k.itemPressed).toBe(false);
+  // The rest of the input is the latest message.
+  expect(session.driverFor(0).input()).toEqual({ steer: 0, gas: true, brake: false, item: false });
+});
+
+test('a phone holding the item button reads as held across steps (one press only)', () => {
+  const { game, session } = setup(1);
+  session.onHello('a', 'Ada');
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  const k = game.karts[0];
+  k.item = 'boost';
+  const held: ClientMsg = { t: 'input', steer: 0, gas: true, brake: false, item: true };
+  session.onMessage('a', held);
+  stepFor(game, session, 1);
+  expect(k.item).toBeNull();
+  k.item = 'shield';
+  for (let i = 0; i < 10; i++) {
+    session.onMessage('a', held);
+    stepFor(game, session, 1);
+    expect(k.itemPressed).toBe(true);
+  }
+  expect(k.item).toBe('shield'); // never a second rising edge while held
+});

@@ -14,8 +14,7 @@ export const BOX_RESPAWN = 3;
 export const ROLL_TIME = 1;
 
 const EPS = 1e-9;
-const NONE: number[] = [];
-Object.freeze(NONE);
+const NONE: readonly never[] = Object.freeze([]);
 
 /** The item boxes on the track: driving through one starts a 1 s roll, the box hides for 3 s. */
 export class ItemBoxes {
@@ -29,7 +28,7 @@ export class ItemBoxes {
   }
 
   /** Ticks rolls and hidden boxes, then hands out boxes. Returns ids of karts whose roll finished (→ `itemGot`). */
-  update(dt: number, karts: Kart[], world: World, rand: () => number): number[] {
+  update(dt: number, karts: Kart[], world: World, rand: () => number): readonly number[] {
     for (const b of this.boxes) {
       if (b.respawn > 0) b.respawn = b.respawn - dt <= EPS ? 0 : b.respawn - dt;
     }

@@ -50,7 +50,7 @@ describe('createBotBrain', () => {
 });
 
 describe('botInput', () => {
-  test('never brakes or uses items, and steer stays in [-1, 1]', () => {
+  test('never brakes, never fires an item without a world, and steer stays in [-1, 1]', () => {
     const rand = mulberry32(11);
     const b = createBotBrain(rand);
     const k = createKart(0, KART_COLORS[0], track.grid[0], track);

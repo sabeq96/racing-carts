@@ -1,15 +1,15 @@
 /**
  * Every powerup the game knows. Item boxes roll from this list, item presses look ids up here.
  *
- * Adding a powerup:
- *   1. Create `items/<name>.ts` exporting a `PowerupDef` (see `types.ts`): an `id`, `name`, emoji `icon`,
- *      a `weight(ctx)` (use `rankFraction(ctx)` from `odds.ts`: 0 = leader, 1 = last) and `use({ kart, world })`.
- *   2. Add it to `POWERUPS` below. That is all: rolls, the phone icon, the TV race list and bots pick it up.
- *   `use` talks to the game only through `WorldApi`: timed effects (`applyEffect`), `hitKart`, `spawnEntity`
- *   for things on the track (they need `update`, and `onHitKart` to touch karts), and `sfx` for sounds.
- *   Optional `botShouldUse(ctx)` says when a bot fires it (default: as soon as it has held it a moment).
- *   A new effect kind only does something if code reads it (e.g. `stepKart` reads `boost`).
- *   More detail: docs/powerups.md.
+ * Adding a powerup (docs/powerups.md has a full example, an oil slick):
+ *   1. Create `items/<name>.ts` exporting a `PowerupDef` (see `types.ts`): `id`, `name`, emoji `icon`,
+ *      `weight(ctx)` (use `rankFraction(ctx)` from `odds.ts`: 0 = leader, 1 = last), and `use({ kart, world })`.
+ *      `use` acts only through `WorldApi`: `applyEffect`, `hitKart`, `spawnEntity` (an entity with `update`,
+ *      a `look`, and `onHitKart` to touch karts, skipping its owner itself) and `sfx`.
+ *      Optional `botShouldUse(ctx)` decides when bots fire it.
+ *   2. Add it to `POWERUPS` below. Rolls, phone and TV icons, and bots then pick it up.
+ * Beyond one file: a new sfx name needs `public/audio/<name>.mp3` and a manifest entry. A new effect kind
+ * needs a reader (`stepKart` or the world), and optionally a visual in `render/kartViews.ts`.
  */
 import { boost } from './items/boost';
 import { shield } from './items/shield';

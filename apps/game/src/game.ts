@@ -6,9 +6,8 @@ import { createWorld, type World } from './powerups/world';
 import { Race, type RaceEvent } from './race/race';
 import type { Track } from './track/track';
 
-/** Returned by `drainItemGot` on quiet steps, so they allocate nothing. Never mutated. */
-const NO_IDS: number[] = [];
-Object.freeze(NO_IDS);
+/** Returned by `drainItemGot` on quiet steps, so they allocate nothing. */
+const NO_IDS: readonly never[] = Object.freeze([]);
 
 export interface Driver {
   kind: 'human' | 'bot';
@@ -77,7 +76,7 @@ export class Game {
   }
 
   /** Kart ids whose item roll finished since the last call (each → an `itemGot` event to that phone). */
-  drainItemGot(): number[] {
+  drainItemGot(): readonly number[] {
     if (this.itemGot.length === 0) return NO_IDS;
     const out = this.itemGot;
     this.itemGot = [];

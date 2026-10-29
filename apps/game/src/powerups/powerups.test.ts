@@ -74,6 +74,11 @@ describe('rollItem', () => {
     expect(rollItem(ctx, () => 0.999999, [...POWERUPS, none])).toBe(POWERUPS[POWERUPS.length - 1].id);
   });
 
+  test('rollItem falls back to the first def when no weight is positive', () => {
+    const zero = (id: string): PowerupDef => ({ ...TEST_DEF, id, weight: () => 0 });
+    expect(rollItem({ position: 1, racerCount: 2 }, () => 0.5, [zero('a'), zero('b')])).toBe('a');
+  });
+
   test('rank fraction: 0 for the leader, 1 for last, 0 when racing alone', () => {
     expect(rankFraction({ position: 1, racerCount: 6 })).toBe(0);
     expect(rankFraction({ position: 6, racerCount: 6 })).toBe(1);

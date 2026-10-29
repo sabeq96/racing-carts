@@ -24,6 +24,12 @@ const BOT_DT = 1 / 60;
 
 type StateMsg = Extract<ServerMsg, { t: 'state' }>;
 
+/** A phone's latest input plus an item press not yet seen by a step, and the snapshot handed to the game. */
+interface PhoneInput extends InputSnapshot {
+  itemLatch: boolean;
+  out: InputSnapshot;
+}
+
 export interface SessionOptions {
   /** Bots added on top of the humans when a race starts (capped at MAX_PLAYERS karts in total). */
   maxBots: number;
@@ -43,7 +49,7 @@ export const STATE_HEARTBEAT_MS = 1000;
  */
 export class Session {
   /** Latest input per token, only filled while racing. */
-  private inputs = new Map<string, InputSnapshot>();
+  private inputs = new Map<string, PhoneInput>();
   /** JSON and time of the last `state` sent per token: unchanged state is only resent as a heartbeat. */
   private lastSent = new Map<string, { json: string; at: number }>();
   private readonly now: () => number;
@@ -87,7 +93,15 @@ export class Session {
     switch (msg.t) {
       case 'input':
         if (race.phase === 'racing') {
-          this.inputs.set(token, { steer: msg.steer, gas: msg.gas, brake: msg.brake, item: msg.item });
+          const prev = this.inputs.get(token);
+          const next = prev ?? { steer: 0, gas: false, brake: false, item: false, itemLatch: false, out: { ...NEUTRAL_INPUT } };
+          next.steer = msg.steer;
+          next.gas = msg.gas;
+          next.brake = msg.brake;
+          next.item = msg.item;
+          // A press stays latched until a step reads it, even if the release arrives first.
+          next.itemLatch = next.itemLatch || msg.item;
+          this.inputs.set(token, next);
         }
         break;
       case 'start':
@@ -122,7 +136,7 @@ export class Session {
         d = {
           kind: 'human',
           name: p.name,
-          input: keyboard ? () => keyboard.input() : () => this.inputs.get(token) ?? NEUTRAL_INPUT,
+          input: keyboard ? () => keyboard.input() : () => this.phoneInput(token),
         };
         this.humanDrivers.set(token, d);
       }
@@ -177,6 +191,22 @@ export class Session {
     const p = this.registry.bySlot(kartId);
     if (!p || !p.connected || p.token === KEYBOARD_TOKEN) return;
     this.send(p.token, { t: 'event', kind });
+  }
+
+  /**
+   * The phone's latest input for one fixed step: `item` is the held level or a press latched since the
+   * last step (cleared here, so the next step sees the real level). Reuses one snapshot per phone.
+   */
+  private phoneInput(token: string): InputSnapshot {
+    const p = this.inputs.get(token);
+    if (!p) return NEUTRAL_INPUT;
+    const out = p.out;
+    out.steer = p.steer;
+    out.gas = p.gas;
+    out.brake = p.brake;
+    out.item = p.item || p.itemLatch;
+    p.itemLatch = false;
+    return out;
   }
 
   /** Relays what happened to karts during the latest steps: spin-out hits and finished item rolls. */

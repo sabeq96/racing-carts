@@ -6,6 +6,8 @@ export function rollItem(ctx: RollContext, rand: () => number, defs: PowerupDef[
   let total = 0;
   for (const d of defs) total += Math.max(0, d.weight(ctx));
   let r = rand() * total;
+  // If no def has a positive weight (say every item is disabled at this position), the box still gives
+  // something rather than an empty roll: the first def, so a kart that drove through a box is never cheated.
   let last = defs.length > 0 ? defs[0].id : '';
   for (const d of defs) {
     const w = Math.max(0, d.weight(ctx));

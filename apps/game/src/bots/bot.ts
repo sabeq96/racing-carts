@@ -1,5 +1,5 @@
 import type { InputSnapshot } from '@rc/shared';
-import type { Kart } from '../kart/kart';
+import { effectLeft, type Kart } from '../kart/kart';
 import { BOOST_FACTOR, MAX_SPEED } from '../kart/tuning';
 import { wrapAngle } from '../math/vec2';
 import { getPowerup } from '../powerups/registry';
@@ -95,7 +95,7 @@ export function botInput(
 
   const turn = Math.abs(wrapAngle(track.headingAt(s + b.lookahead) - track.headingAt(s)));
   const corner = 1 - CORNER_SLOWDOWN * clamp(turn / SHARP_TURN, 0, 1);
-  const boost = k.effects.some((e) => e.kind === 'boost');
+  const boost = effectLeft(k, 'boost') > 0;
   const targetSpeed = MAX_SPEED * b.speedFactor * corner * (boost ? BOOST_FACTOR : 1);
 
   const item = wantsItem(b, k, dt, world);

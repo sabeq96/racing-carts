@@ -1,5 +1,6 @@
 import { INPUT_HZ, KART_COLORS, type ClientMsg, type ServerMsg } from '@rc/shared';
 import { connect, type Link } from './connection';
+import { createPressLatch } from './latch';
 import { gravityToRollDeg, rollToSteer } from './tilt';
 import './style.css';
 
@@ -114,6 +115,8 @@ let started = false;
 let gas = false;
 let brake = false;
 let item = false;
+/** A tap on the item button shorter than one send interval still goes out as one press. */
+const itemLatch = createPressLatch();
 let left = false;
 let right = false;
 
@@ -369,8 +372,10 @@ function onServerMsg(m: ServerMsg): void {
 function sendInput(): void {
   const steer = currentSteer();
   showMeter(steer);
+  // Read (and clear) the latch even when not connected, so a press never fires late after a reconnect.
+  const itemNow = itemLatch.read(item);
   if (!link || link.status !== 'open') return;
-  link.send({ t: 'input', steer, gas, brake, item } satisfies ClientMsg);
+  link.send({ t: 'input', steer, gas, brake, item: itemNow } satisfies ClientMsg);
 }
 
 setInterval(sendInput, 1000 / INPUT_HZ);
@@ -406,7 +411,10 @@ function holdButton(el: HTMLElement, set: (down: boolean) => void): void {
 
 holdButton(els.gasPad, (d) => (gas = d));
 holdButton(els.brakePad, (d) => (brake = d));
-holdButton(els.itemPad, (d) => (item = d));
+holdButton(els.itemPad, (d) => {
+  if (d && !item) itemLatch.press();
+  item = d;
+});
 holdButton(els.leftBtn, (d) => (left = d));
 holdButton(els.rightBtn, (d) => (right = d));
 

@@ -8,11 +8,16 @@ export interface RollContext {
   racerCount: number;
 }
 
-/** How render draws an entity: a simple pastel shape, `size` metres across, floating at `y` (default size/2). */
+/**
+ * How render draws an entity: a simple pastel shape `size` metres across, its centre at height `y`
+ * (default size/2). `height` overrides the vertical size for a non-uniform shape, e.g. a `disc` is a flat
+ * cylinder `size` across and `height` thick (a puddle, a pad).
+ */
 export interface EntityLook {
-  shape: 'sphere' | 'cone' | 'box';
+  shape: 'sphere' | 'cone' | 'box' | 'disc';
   color: string;
   size: number;
+  height?: number;
   y?: number;
   spin?: boolean;
 }
