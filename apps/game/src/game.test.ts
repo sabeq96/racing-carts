@@ -281,3 +281,52 @@ for (const seed of [1, 2, 3]) {
     for (const b of bots) expect(b.finishedAt as number).toBeLessThan(human.finishedAt as number);
   });
 }
+
+test('boost pads and slipstream only work while racing (not in the countdown)', () => {
+  const g = new Game(track);
+  g.setupKarts(2);
+  g.race.start();
+  const d = human(() => NEUTRAL_INPUT);
+  const [a, b] = g.karts;
+  // a sits on the start pad; b drives 6 m behind a at speed, inside the drafting window.
+  const pad = track.boostPads[0];
+  a.pos = { x: pad.pos.x, z: pad.pos.z };
+  a.heading = pad.heading;
+  a.trackIndex = track.project(a.pos).index;
+  a.distance = pad.s;
+  a.speed = 15;
+  b.pos = track.pointAt(pad.s - 6, 0);
+  b.heading = track.headingAt(pad.s - 6);
+  b.trackIndex = track.project(b.pos).index;
+  b.distance = pad.s - 6;
+  b.speed = 15;
+  g.world.drainSfx();
+  g.step(1 / 60, d);
+  expect(g.race.phase).toBe('countdown');
+  expect(g.world.hasEffect(a, 'boost')).toBe(false);
+  expect(b.draft).toBe(0);
+  expect(g.world.drainSfx()).toEqual([]);
+});
+
+test('catch-up: a finished kart gets the plain top speed, whatever its place', () => {
+  const g = new Game(track);
+  g.setupKarts(3);
+  const d = human(() => gas);
+  toRacing(g, d);
+  // Karts 0 and 1 have finished (0 first), kart 2 is still racing: kart 1 ranks 2nd of 3 (fraction 0.5).
+  g.karts[0].finishedAt = 10;
+  g.karts[1].finishedAt = 11;
+  const place: [number, number][] = [[16, -3], [-2, 3], [-20, 0]];
+  g.karts.forEach((k, i) => {
+    const [s, lateral] = place[i];
+    k.pos = track.pointAt(s, lateral);
+    k.heading = track.headingAt(s);
+    k.trackIndex = track.project(k.pos).index;
+    k.distance = s;
+    k.speed = MAX_SPEED;
+    k.vel = { x: Math.sin(k.heading) * MAX_SPEED, z: Math.cos(k.heading) * MAX_SPEED };
+  });
+  for (let i = 0; i < 60; i++) g.step(1 / 60, d);
+  expect(g.karts[1].speed).toBeCloseTo(MAX_SPEED, 6); // would be 1.03 x if catch-up counted it
+  expect(g.karts[2].speed).toBeCloseTo(MAX_SPEED * 1.06, 6); // the one still racing is last: full catch-up
+});

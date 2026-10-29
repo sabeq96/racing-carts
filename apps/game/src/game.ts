@@ -70,9 +70,9 @@ export class Game {
   }
 
   /**
-   * One fixed step: inputs → item presses → physics (with catch-up) → kart collisions → item boxes → boost pads →
-   * slipstream → powerup world (entities, effects) → race (progress, laps, phases). Inputs, items included, only count
-   * while racing.
+   * One fixed step: inputs → item presses → physics (with catch-up) → kart collisions → item boxes → boost
+   * pads and slipstream (racing only) → powerup world (entities, effects) → race (progress, laps, phases).
+   * Inputs, items included, only count while racing.
    */
   step(dt: number, drivers: (kartId: number) => Driver): RaceEvent[] {
     const racing = this.race.phase === 'racing';
@@ -94,8 +94,11 @@ export class Game {
     for (const [a, b] of resolveKartCollisions(karts)) this.bumps.push(a, b);
     const got = this.itemBoxes.update(dt, karts, this.world, this.rand);
     for (const id of got) this.itemGot.push(id);
-    this.boostPads.update(dt, karts, this.world);
-    stepSlipstream(this.ranked, this.world, dt); // distances only change in the race step: still in order
+    if (racing) {
+      // Pads and drafting are race rules: nothing fires on the grid or after the results are up.
+      this.boostPads.update(dt, karts, this.world);
+      stepSlipstream(this.ranked, this.world, dt); // distances only change in the race step: still in order
+    }
     this.world.step(dt);
     return this.race.update(dt, karts, this.track, this.isHuman);
   }
