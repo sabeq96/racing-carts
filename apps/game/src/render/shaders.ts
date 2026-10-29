@@ -12,10 +12,12 @@ import { Texture } from '@babylonjs/core/Materials/Textures/texture';
 
 /** Direction towards the sun: high, behind the camera's right shoulder, so fronts of things are lit. */
 export const SUN_DIR = new Vector3(0.5, 0.8, -0.6).normalize();
+/** Fog colour: a warm peach haze where the far meadow fades out. */
 export const HORIZON = '#FFD9B8';
 /** Wind: unit direction on the ground (x, z). Clouds drift and trees sway along it. */
 export const WIND_X = 0.96;
 export const WIND_Z = 0.28;
+/** Soft sky blue, reflected in the pond. */
 export const ZENITH = '#9FD3FF';
 
 /**
@@ -67,7 +69,7 @@ const vec3 SUN = ${vec3(SUN_DIR)};
 const vec3 HORIZON = ${glsl(HORIZON)};
 const vec3 ZENITH = ${glsl(ZENITH)};
 /** The warm tint of sunlit, up-facing surfaces. */
-const vec3 SUNLIT = vec3(1.03, 1.0, 0.95);
+const vec3 SUNLIT = vec3(1.0, 0.96, 0.9);
 vec3 fog(vec3 c) {
   float f = clamp((vFogInfos.z - vDepth) / max(vFogInfos.z - vFogInfos.y, 0.001), 0.0, 1.0);
   return mix(vFogColor, c, f);
@@ -97,33 +99,6 @@ function shader(name: string, scene: Scene, vertex: string, fragment: string, o:
     },
   );
   m.setVector4('env', ENV);
-  return m;
-}
-
-/** Sky dome: peach horizon to soft-blue zenith with a glowing sun; drawn first, behind everything. */
-export function skyMaterial(scene: Scene): ShaderMaterial {
-  const m = shader(
-    'sky',
-    scene,
-    `varying vec3 vDir;
-void main() {
-  vDir = position;
-  vec4 p = worldMatrix() * vec4(position, 1.0);
-  vPosW = p.xyz;
-  vDepth = 0.0;
-  gl_Position = viewProjection * p;
-}`,
-    `varying vec3 vDir;
-void main() {
-  vec3 d = normalize(vDir);
-  vec3 c = mix(HORIZON, ZENITH, pow(clamp(d.y, 0.0, 1.0), 0.55));
-  float s = max(dot(d, SUN), 0.0);
-  c += vec3(1.0, 0.93, 0.78) * (smoothstep(0.9975, 0.9988, s) * 0.6 + pow(s, 24.0) * 0.25);
-  gl_FragColor = vec4(c, 1.0);
-}`,
-  );
-  m.backFaceCulling = false;
-  m.disableDepthWrite = true;
   return m;
 }
 
@@ -181,7 +156,7 @@ void main() {
 }
 
 /**
- * Soft toon shading: three gentle bands (deep shade, mid, warm sunlit), and a subtle warm rim
+ * Soft toon shading: three gentle bands (deep shade, mid, warm sunlit), and one subtle warm rim
  * that lifts silhouettes off the grass. Up-facing surfaces show `hex` itself. Vertex colours, if the
  * mesh has them, tint it. Works for plain meshes, clones and instances. Variants:
  * - `sway`: foliage bends in the wind. The mesh's uv holds (phase, height where the foliage starts);
@@ -193,7 +168,6 @@ export function toonMaterial(
   name: string,
   hex: string,
   scene: Scene,
-  rim = 0.18,
   variant: 'sway' | 'shimmer' | null = null,
 ): ShaderMaterial {
   const m = shader(
@@ -231,7 +205,6 @@ void main() {
   gl_Position = viewProjection * p;
 }`,
     `uniform vec3 color;
-uniform float rim;
 #ifdef VERTEXCOLOR
 varying vec3 vColor;
 #endif
@@ -264,17 +237,16 @@ void main() {
   c = mix(c, base * SUNLIT, smoothstep(0.7, 0.76, hl));
   float r = 1.0 - max(dot(n, normalize(cameraPosition - vPosW)), 0.0);
   r *= r;
-  c = mix(c, vec3(1.0, 0.96, 0.88), r * r * rim);
+  c = mix(c, vec3(1.0, 0.96, 0.88), r * r * 0.12);
   gl_FragColor = vec4(fog(c), 1.0);
 }`,
     {
       attributes: variant === 'sway' ? ['normal', 'uv'] : ['normal'],
-      uniforms: ['color', 'rim'],
+      uniforms: ['color'],
       defines: variant === 'sway' ? ['SWAY'] : variant === 'shimmer' ? ['SHIMMER'] : [],
     },
   );
   m.setColor3('color', Color3.FromHexString(hex));
-  m.setFloat('rim', rim);
   return m;
 }
 

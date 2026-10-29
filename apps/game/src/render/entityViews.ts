@@ -119,7 +119,7 @@ export class EntityViews {
     const box = new Mesh('itemBox', scene);
     roundedCube(BOX_SIZE, BOX_ROUND).applyToMesh(box);
     // White toon: the vertex colours carry the rainbow, which slowly drifts round the hue wheel.
-    box.material = toonMaterial('itemBox', '#FFFFFF', scene, 0.2, 'shimmer');
+    box.material = toonMaterial('itemBox', '#FFFFFF', scene, 'shimmer');
     // Sources stay enabled but invisible: only their instances are drawn.
     box.isPickable = false;
     box.isVisible = false;

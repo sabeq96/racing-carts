@@ -433,7 +433,7 @@ function buildBunting(track: Track, scene: Scene): void {
       }
     }
   }
-  const mat = toonMaterial('bunting', '#FFFFFF', scene, 0.05);
+  const mat = toonMaterial('bunting', '#FFFFFF', scene);
   mat.backFaceCulling = false;
   bake('bunting', parts, scene).material = mat;
 }
@@ -493,6 +493,6 @@ export function buildDecorations(scene: Scene, track: Track, blocked: readonly C
   buildArch(track, solid, scene);
   buildFences(track, solid);
   buildFlowersAndBushes(track, blocked, solid);
-  bake('decor', solid, scene).material = toonMaterial('decor', '#FFFFFF', scene, 0.08);
+  bake('decor', solid, scene).material = toonMaterial('decor', '#FFFFFF', scene);
   buildBunting(track, scene);
 }

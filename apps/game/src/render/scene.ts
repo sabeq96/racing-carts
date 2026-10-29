@@ -19,7 +19,7 @@ import type { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 import { PAD_LENGTH, PAD_WIDTH } from '../race/boostPads';
 import type { Track } from '../track/track';
 import type { Texture } from '@babylonjs/core/Materials/Textures/texture';
-import { ENV, HORIZON, SUN_DIR, grassMaterial, noiseTexture, padMaterial, roadMaterial, skyMaterial, toonMaterial } from './shaders';
+import { ENV, HORIZON, SUN_DIR, grassMaterial, noiseTexture, padMaterial, roadMaterial, toonMaterial } from './shaders';
 import { buildClouds, buildDecorations, buildPond, fixedBlockers, seeded, type Circle } from './decor';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 
@@ -51,25 +51,18 @@ const DASH_WIDTH = 0.5;
 const GRID_CLEAR = 24;
 const SCENERY_SEED = 20261029;
 
+/** Up-facing surfaces receive hemi 0.9 + sun 0.6 × the sun's height (SUN_DIR points at the sun). */
 const HEMI_INTENSITY = 0.9;
 const SUN_INTENSITY = 0.6;
-/** Golden-afternoon light: a warm sun and a cooler sky fill (the hemisphere's ground side is warm). */
-const SUN_COLOR = Color3.FromHexString('#FFE2B0');
-const SKY_FILL = Color3.FromHexString('#E6EEFF');
-const GROUND_FILL = Color3.FromHexString('#E6D6C4');
 /**
  * The two lights together brighten up-facing surfaces by ~1.33×, which would wash pastels out to
- * yellow-white. Diffuse colours are pre-divided by the brightness of that light, so the tops of things
- * show the palette colour (a touch golden) and sides fall off into soft shading.
+ * yellow-white. Diffuse colours are pre-divided so the tops of things show the palette colour and
+ * sides fall off into soft shading.
  */
-const TOP_LIGHT = SKY_FILL.scale(HEMI_INTENSITY).add(SUN_COLOR.scale(SUN_INTENSITY * SUN_DIR.y));
-const LIGHT_COMP = 1 / (0.3 * TOP_LIGHT.r + 0.59 * TOP_LIGHT.g + 0.11 * TOP_LIGHT.b);
-
-/** Sky dome radius (m): inside the camera's far plane; it follows the camera. */
-const SKY_RADIUS = 900;
-/** Linear fog from FOG_START to FOG_END camera radii, so every zoom fades its far edge into the horizon. */
-const FOG_START = 1.5;
-const FOG_END = 4;
+const LIGHT_COMP = 1 / (HEMI_INTENSITY + SUN_INTENSITY * SUN_DIR.y);
+/** Linear fog in fixed metres: the near view stays crisp, the far meadow fades into a warm haze. */
+const FOG_START = 100;
+const FOG_END = 750;
 
 /** Share of each colour that glows regardless of light, so shaded sides stay soft pastel, not muddy. */
 const SELF_LIT = 0.3;
@@ -344,27 +337,16 @@ function buildScenery(scene: Scene, track: Track, blocked: readonly Circle[]): C
     const m = merge(meshes, name);
     if (m) m.material = mat;
   };
-  set(trunks, 'trunks', toonMaterial('trunk', PALETTE.trunk, scene, 0.08));
-  set(canopies, 'canopies', toonMaterial('canopy', PALETTE.canopy, scene, 0.12, 'sway'));
-  set(rocks, 'rocks', toonMaterial('rock', PALETTE.rock, scene, 0.1));
+  set(trunks, 'trunks', toonMaterial('trunk', PALETTE.trunk, scene));
+  set(canopies, 'canopies', toonMaterial('canopy', PALETTE.canopy, scene, 'sway'));
+  set(rocks, 'rocks', toonMaterial('rock', PALETTE.rock, scene));
   const shadowMat = blobShadowMaterial(scene);
   set(shadows, 'sceneryShadows', shadowMat);
   shadowMat.freeze();
   return placed;
 }
 
-/** A large dome around the camera with the gradient sky; created first, so it is drawn first. */
-function buildSky(scene: Scene): void {
-  const sky = CreateSphere('sky', { diameter: SKY_RADIUS * 2, segments: 12 }, scene);
-  sky.material = skyMaterial(scene);
-  sky.infiniteDistance = true;
-  sky.applyFog = false;
-  sky.isPickable = false;
-  sky.doNotSyncBoundingInfo = true;
-  sky.alwaysSelectAsActiveMesh = true;
-}
-
-/** Builds the static world: sky, warm lights, grass, road, start stripe, walls and scenery. */
+/** Builds the static world: warm lights, haze, grass, road, start stripe, walls and scenery. */
 export function createScene(engine: Engine, track: Track): Scene {
   const scene = new Scene(engine);
   scene.clearColor = Color4.FromHexString(HORIZON + 'FF');
@@ -373,19 +355,21 @@ export function createScene(engine: Engine, track: Track): Scene {
   scene.detachControl();
   scene.fogMode = Scene.FOGMODE_LINEAR;
   scene.fogColor = Color3.FromHexString(HORIZON);
+  scene.fogStart = FOG_START;
+  scene.fogEnd = FOG_END;
 
   const hemi = new HemisphericLight('hemi', new Vector3(0, 1, 0), scene);
   hemi.intensity = HEMI_INTENSITY;
-  hemi.diffuse = SKY_FILL;
-  hemi.groundColor = GROUND_FILL;
+  hemi.diffuse = Color3.FromHexString('#FFF4E2');
+  hemi.groundColor = Color3.FromHexString('#D8CABE');
   hemi.specular = Color3.Black();
 
   const sun = new DirectionalLight('sun', SUN_DIR.negate(), scene);
   sun.intensity = SUN_INTENSITY;
-  sun.diffuse = SUN_COLOR;
+  sun.diffuse = Color3.FromHexString('#FFE9CF');
   sun.specular = Color3.Black();
 
-  // Shared shader clock and camera framing, and fog that scales with the zoom. No allocations.
+  // Shared shader clock and camera framing. No allocations.
   scene.onBeforeRenderObservable.add(() => {
     ENV.x += Math.min(0.1, engine.getDeltaTime() / 1000);
     const cam = scene.activeCamera as ArcRotateCamera | null;
@@ -393,11 +377,8 @@ export function createScene(engine: Engine, track: Track): Scene {
     ENV.y = cam.target.x;
     ENV.z = cam.target.z;
     ENV.w = cam.radius;
-    scene.fogStart = cam.radius * FOG_START;
-    scene.fogEnd = cam.radius * FOG_END;
   });
 
-  buildSky(scene);
   const noise = noiseTexture(scene);
   buildGround(scene, track, noise);
   buildRoad(scene, track, noise);
