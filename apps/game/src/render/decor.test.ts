@@ -1,7 +1,23 @@
 import { describe, expect, test } from 'vitest';
 import { buildTrack } from '../track/track';
 import { TRACK_V1 } from '../track/trackDef';
-import { POND, POND_SHORE, centreDistance, cloudAt, edgeFade, nearFade, screenFade, wrapInto, type Area } from './decor';
+import {
+  POND,
+  POND_SHORE,
+  archLayout,
+  buntingLayout,
+  centreDistance,
+  cloudAt,
+  edgeFade,
+  fenceLayout,
+  fixedBlockers,
+  nearFade,
+  scatterLayout,
+  screenFade,
+  wrapInto,
+  type Area,
+  type Circle,
+} from './decor';
 
 const track = buildTrack(TRACK_V1);
 
@@ -71,5 +87,52 @@ describe('pond', () => {
       const d = centreDistance(track, POND.x + Math.cos(a) * outer, POND.z + Math.sin(a) * outer);
       expect(d).toBeGreaterThanOrEqual(track.width / 2 + 8);
     }
+  });
+});
+
+describe('decorations stay off the track', () => {
+  /** The candy walls' outer edge: wall centre width/2 + 0.48, radius 0.6. */
+  const wallOuter = track.width / 2 + 0.48 + 0.6;
+
+  test('the arch posts stand just outside the walls, either side of the start line', () => {
+    const { posts } = archLayout(track);
+    expect(posts).toHaveLength(2);
+    for (const p of posts) {
+      expect(centreDistance(track, p.x, p.z)).toBeGreaterThan(wallOuter + 0.3);
+      expect(track.project(p).s < 0.5 || track.project(p).s > track.length - 0.5).toBe(true);
+    }
+  });
+
+  test('bunting poles and fence posts are outside the walls, with room to spare', () => {
+    const poles = buntingLayout(track);
+    expect(poles.length).toBeGreaterThanOrEqual(3);
+    for (const p of poles) expect(centreDistance(track, p.x, p.z)).toBeGreaterThanOrEqual(track.width / 2 + 2);
+    const runs = fenceLayout(track);
+    expect(runs.length).toBeGreaterThanOrEqual(2);
+    for (const run of runs) {
+      for (let i = 0; i < run.length; i++) {
+        expect(centreDistance(track, run[i].x, run[i].z)).toBeGreaterThanOrEqual(track.width / 2 + 2);
+        // Evenly spaced along the fence, so every rail is about one step long.
+        if (i > 0) expect(Math.hypot(run[i].x - run[i - 1].x, run[i].z - run[i - 1].z)).toBeLessThan(3.4);
+      }
+    }
+  });
+
+  test('flowers and bushes keep off the road, the pond and everything already placed', () => {
+    const tree: Circle = { x: -20, z: 0, r: 3 };
+    const blocked = [...fixedBlockers(track), tree];
+    const { flowers, bushes } = scatterLayout(track, blocked);
+    expect(flowers.length).toBeGreaterThan(15);
+    expect(bushes.length).toBeGreaterThan(8);
+    const pondOuter = POND.r * 1.11 + POND_SHORE;
+    for (const c of [...flowers, ...bushes]) {
+      expect(centreDistance(track, c.x, c.z)).toBeGreaterThanOrEqual(track.width / 2 + 2.5 + c.r);
+      expect(Math.hypot(c.x - POND.x, c.z - POND.z)).toBeGreaterThan(pondOuter + c.r);
+      for (const b of blocked) expect(Math.hypot(c.x - b.x, c.z - b.z)).toBeGreaterThan(b.r + c.r);
+    }
+  });
+
+  test('the layout is the same every boot', () => {
+    expect(scatterLayout(track, fixedBlockers(track))).toEqual(scatterLayout(track, fixedBlockers(track)));
   });
 });

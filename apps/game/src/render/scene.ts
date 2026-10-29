@@ -20,7 +20,7 @@ import { PAD_LENGTH, PAD_WIDTH } from '../race/boostPads';
 import type { Track } from '../track/track';
 import type { Texture } from '@babylonjs/core/Materials/Textures/texture';
 import { ENV, HORIZON, SUN_DIR, grassMaterial, noiseTexture, padMaterial, roadMaterial, skyMaterial, toonMaterial } from './shaders';
-import { POND, POND_SHORE, buildClouds, buildPond, seeded } from './decor';
+import { buildClouds, buildDecorations, buildPond, fixedBlockers, seeded, type Circle } from './decor';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 
 export const PALETTE = {
@@ -290,16 +290,19 @@ function buildWalls(scene: Scene, track: Track): void {
   });
 }
 
-/** Lollipop trees and rounded rocks scattered off the road, merged per material. */
-function buildScenery(scene: Scene, track: Track): void {
+/**
+ * Lollipop trees and rounded rocks scattered off the road and clear of `blocked`, merged per material.
+ * Returns the room they take (with `blocked`).
+ */
+function buildScenery(scene: Scene, track: Track, blocked: readonly Circle[]): Circle[] {
   const rand = seeded(SCENERY_SEED);
   const b = track.bounds;
   const pad = GROUND_MARGIN - 4;
   const clear = track.width / 2 + 6;
-  const placed: { x: number; z: number; r: number }[] = [{ x: POND.x, z: POND.z, r: POND.r + POND_SHORE }];
+  const placed: Circle[] = blocked.slice();
   const trunks: Mesh[] = [], canopies: Mesh[] = [], rocks: Mesh[] = [], shadows: Mesh[] = [];
 
-  for (let tries = 0; placed.length < SCENERY_COUNT && tries < 4000; tries++) {
+  for (let tries = 0; placed.length - blocked.length < SCENERY_COUNT && tries < 4000; tries++) {
     const x = b.minX - pad + rand() * (b.maxX - b.minX + 2 * pad);
     const z = b.minZ - pad + rand() * (b.maxZ - b.minZ + 2 * pad);
     const isTree = rand() < 0.7;
@@ -347,6 +350,7 @@ function buildScenery(scene: Scene, track: Track): void {
   const shadowMat = blobShadowMaterial(scene);
   set(shadows, 'sceneryShadows', shadowMat);
   shadowMat.freeze();
+  return placed;
 }
 
 /** A large dome around the camera with the gradient sky; created first, so it is drawn first. */
@@ -399,8 +403,10 @@ export function createScene(engine: Engine, track: Track): Scene {
   buildRoad(scene, track, noise);
   buildBoostPads(scene, track);
   buildWalls(scene, track);
-  buildScenery(scene, track);
+  const fixed = fixedBlockers(track);
+  const taken = buildScenery(scene, track, fixed);
   buildPond(scene);
+  buildDecorations(scene, track, taken);
   buildClouds(scene, track);
 
   return scene;
