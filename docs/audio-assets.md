@@ -101,7 +101,7 @@ music box on a warm afternoon.
 - **Type:** loop (seamless)
 - **Target duration:** 1 to 2 s
 - **Mood:** a tiny wind-up toy motor, purring and friendly. Quiet background texture, not the star.
-- **Important:** record it at a **neutral pitch, steady and unvarying in loudness**. The game shifts the pitch live between 0.8x (standing still) and 1.4x (top speed) by changing the playback rate, so a clear, stable tone works best.
+- **Important:** record it at a **neutral pitch, steady and unvarying in loudness**. The game shifts the pitch live by changing the playback rate: 0.8x standing still, about 1.4x at top speed and up to about 1.7x during a boost, so a clear, stable tone works best.
 - **Generation prompt:**
   > A gentle toy-motor hum, seamless 1 to 2 second loop. Soft rounded low buzz like a small wind-up or battery toy car, steady pitch and steady volume, slightly warm and fuzzy, with a faint rhythmic purr. Mono, no gear changes, no revving, no pops. Soft, rounded, warm, no harsh high frequencies, no distortion.
 - **Avoid:** realistic car or motorbike engines, whining turbines, growls, a changing pitch or volume, silence at the loop edges.

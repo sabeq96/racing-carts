@@ -22,6 +22,7 @@ export class SoundDirector {
   private wallThrottle = new Throttle(BUMP_THROTTLE_MS);
   private bumpThrottle = new Throttle(BUMP_THROTTLE_MS);
   private lastMusic: MusicName | null = null;
+  private lastPhase: Phase | null = null;
 
   constructor(private readonly audio: Audio) {}
 
@@ -64,12 +65,18 @@ export class SoundDirector {
     for (const name of game.world.drainSfx()) this.audio.play(name as SoundName);
 
     const phase = game.race.phase;
+    // Sound that is still locked (a TV nobody presses a key on) gets another try at every phase change.
+    if (phase !== this.lastPhase) {
+      this.lastPhase = phase;
+      this.audio.unlock();
+    }
     const music = musicFor(phase);
     if (music !== this.lastMusic) this.audio.music((this.lastMusic = music));
     this.audio.engine(phase === 'racing' ? averageSpeed01(game.karts) : null);
   }
 
   playerJoined(): void {
+    this.audio.unlock();
     this.audio.play('player_join');
   }
 }

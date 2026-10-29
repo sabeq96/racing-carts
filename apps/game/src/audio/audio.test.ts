@@ -25,6 +25,8 @@ function fakeContext(state: 'running' | 'suspended' = 'running') {
     start: ReturnType<typeof vi.fn>;
     stop: ReturnType<typeof vi.fn>;
     connect: ReturnType<typeof vi.fn>;
+    disconnect: ReturnType<typeof vi.fn>;
+    onended: (() => void) | null;
   }
   const ctx = {
     state,
@@ -33,9 +35,9 @@ function fakeContext(state: 'running' | 'suspended' = 'running') {
     resume: vi.fn(async function (this: { state: string }) {
       ctx.state = 'running';
     }),
-    createGain: () => ({ gain: param(), connect: vi.fn() }),
+    createGain: () => ({ gain: param(), connect: vi.fn(), disconnect: vi.fn() }),
     createBufferSource: () => {
-      const s: FakeSource = { buffer: null, loop: false, playbackRate: param(), start: vi.fn(), stop: vi.fn(), connect: vi.fn() };
+      const s: FakeSource = { buffer: null, loop: false, playbackRate: param(), start: vi.fn(), stop: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), onended: null };
       sources.push(s);
       return s;
     },
@@ -49,7 +51,7 @@ function fakeContext(state: 'running' | 'suspended' = 'running') {
   return { ctx, sources, log };
 }
 
-function setup(opts: { missing?: string[]; corrupt?: string[]; state?: 'running' | 'suspended'; gestureTarget?: AudioDeps['gestureTarget']; resumeAtBoot?: boolean } = {}) {
+function setup(opts: { missing?: string[]; corrupt?: string[]; state?: 'running' | 'suspended'; gestureTarget?: AudioDeps['gestureTarget']; lazyContext?: boolean } = {}) {
   const f = fakeContext(opts.state);
   const warn = vi.fn();
   const readBytes = vi.fn(async (url: string) => {
@@ -62,7 +64,7 @@ function setup(opts: { missing?: string[]; corrupt?: string[]; state?: 'running'
     readBytes,
     warn,
     gestureTarget: opts.gestureTarget ?? null,
-    resumeAtBoot: opts.resumeAtBoot ?? true,
+    lazyContext: opts.lazyContext ?? false,
   });
   return { ...f, audio, warn, readBytes };
 }
@@ -130,7 +132,7 @@ describe('without Web Audio', () => {
   test('no context: silent, one warning, nothing throws', async () => {
     const warn = vi.fn();
     const readBytes = vi.fn();
-    const audio = createAudio('audio/', { createContext: () => null, readBytes, warn });
+    const audio = createAudio('audio/', { createContext: () => null, readBytes, warn, lazyContext: false });
     await audio.load();
     audio.play('boost');
     audio.music('music_race');
@@ -148,8 +150,91 @@ describe('without Web Audio', () => {
         throw new Error('blocked');
       },
       warn,
+      lazyContext: false,
     });
     audio.play('boost');
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('lazy context (desktop)', () => {
+  function lazySetup() {
+    const handlers = new Map<string, () => void>();
+    const target = {
+      addEventListener: (e: string, h: () => void) => void handlers.set(e, h),
+      removeEventListener: (e: string) => void handlers.delete(e),
+    };
+    const f = fakeContext('suspended');
+    const created = vi.fn(() => {
+      f.ctx.state = 'running'; // a context made inside a key press starts running
+      return f.ctx as unknown as AudioContext;
+    });
+    const warn = vi.fn();
+    const readBytes = vi.fn(async (url: string) => new TextEncoder().encode(url).buffer as ArrayBuffer);
+    const audio = createAudio('audio/', { createContext: created, readBytes, warn, gestureTarget: target, lazyContext: true });
+    return { ...f, audio, created, warn, readBytes, handlers };
+  }
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+  };
+
+  test('no AudioContext is created before the first press', async () => {
+    const { audio, created, handlers, readBytes, warn } = lazySetup();
+    audio.unlock();
+    await audio.load();
+    audio.music('music_lobby');
+    audio.play('boost');
+    audio.engine(0.5);
+    expect(created).not.toHaveBeenCalled();
+    expect(readBytes).toHaveBeenCalledTimes(ALL_SOUNDS.length); // files are read early
+    expect(handlers.size).toBe(3);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test('the first press creates the context, decodes the files and starts the wanted music', async () => {
+    const { audio, created, handlers, sources, warn } = lazySetup();
+    audio.unlock();
+    await audio.load();
+    audio.music('music_lobby');
+    handlers.get('keydown')!();
+    await settle();
+    expect(created).toHaveBeenCalledTimes(1);
+    expect(sources).toHaveLength(1);
+    expect(sources[0].loop).toBe(true);
+    audio.play('boost');
+    expect(sources).toHaveLength(2);
+    expect(handlers.size).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test('a press before the files are read still ends up decoded', async () => {
+    const { audio, handlers, sources } = lazySetup();
+    audio.unlock();
+    handlers.get('pointerdown')!();
+    await audio.load();
+    audio.play('boost');
+    expect(sources).toHaveLength(1);
+  });
+
+  test('a platform without Web Audio warns once on the press and stops listening', async () => {
+    const handlers = new Map<string, () => void>();
+    const warn = vi.fn();
+    const audio = createAudio('audio/', {
+      createContext: () => null,
+      readBytes: async () => new ArrayBuffer(4),
+      warn,
+      lazyContext: true,
+      gestureTarget: {
+        addEventListener: (e, h) => void handlers.set(e, h as () => void),
+        removeEventListener: (e) => void handlers.delete(e),
+      },
+    });
+    audio.unlock();
+    handlers.get('keydown')!();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(handlers.size).toBe(0);
+    audio.play('boost');
+    await audio.load();
     expect(warn).toHaveBeenCalledTimes(1);
   });
 });
@@ -169,6 +254,15 @@ describe('play', () => {
     audio.play('boost');
     expect(sources).toHaveLength(2);
     expect(sources.every((s) => !s.loop && s.start.mock.calls.length === 1)).toBe(true);
+  });
+
+  test('finished one-shots are disconnected', async () => {
+    const { audio, sources } = setup();
+    await audio.load();
+    audio.play('boost');
+    expect(sources[0].disconnect).not.toHaveBeenCalled();
+    sources[0].onended?.();
+    expect(sources[0].disconnect).toHaveBeenCalledTimes(1);
   });
 
   test('is silent before load()', () => {
@@ -254,6 +348,30 @@ describe('engine', () => {
     expect(sources).toHaveLength(2);
   });
 
+  test('two race starts in a row leave exactly one engine voice running', async () => {
+    const { audio, sources, ctx } = setup();
+    await audio.load();
+    const active = () => sources.filter((s) => s.loop && s.stop.mock.calls.length === 0).length;
+    // Race 1: engine on for a while, then results (null), then race 2.
+    for (let i = 0; i < 5; i++) {
+      ctx.currentTime += 0.016;
+      audio.engine(0.4);
+    }
+    expect(active()).toBe(1);
+    audio.engine(null);
+    expect(active()).toBe(0);
+    for (let i = 0; i < 5; i++) {
+      ctx.currentTime += 0.016;
+      audio.engine(0.4);
+    }
+    expect(active()).toBe(1);
+    audio.engine(null);
+    audio.engine(null);
+    audio.engine(0.1);
+    audio.engine(0.1);
+    expect(active()).toBe(1);
+  });
+
   test('without a file it stays silent', async () => {
     const { audio, sources } = setup({ missing: ['engine_loop'] });
     await audio.load();
@@ -285,13 +403,33 @@ describe('unlock', () => {
     const add = vi.fn();
     const { audio, ctx } = setup({
       state: 'suspended',
-      resumeAtBoot: false,
+      lazyContext: true,
       gestureTarget: { addEventListener: add, removeEventListener: vi.fn() },
     });
     audio.unlock();
     audio.unlock(); // asking again does not stack listeners
     expect(ctx.resume).not.toHaveBeenCalled();
     expect(add).toHaveBeenCalledTimes(3);
+  });
+
+  test('asking again retries the resume while the context is not running, and stops once it is', async () => {
+    const { audio, ctx } = setup({ state: 'suspended', gestureTarget: { addEventListener: vi.fn(), removeEventListener: vi.fn() } });
+    ctx.resume.mockImplementation(async () => {}); // the boot resume did not take
+    audio.unlock();
+    audio.unlock();
+    audio.unlock();
+    expect(ctx.resume).toHaveBeenCalledTimes(3);
+    expect(ctx.state).toBe('suspended');
+    ctx.resume.mockImplementation(async () => {
+      ctx.state = 'running';
+    });
+    audio.unlock();
+    await Promise.resolve();
+    expect(ctx.state).toBe('running');
+    const calls = ctx.resume.mock.calls.length;
+    audio.unlock(); // cheap no-op now
+    audio.unlock();
+    expect(ctx.resume).toHaveBeenCalledTimes(calls);
   });
 
   test('a running context needs no listeners', () => {

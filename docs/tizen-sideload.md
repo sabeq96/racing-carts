@@ -71,6 +71,7 @@ Then open `chrome://inspect` (or `http://localhost:9222`) in desktop Chrome and 
 - **`sdb connect` fails or the TV is listed as `offline`:** the Host PC IP typed in Developer mode must be the IP of the computer you are running `sdb` on. If your PC's IP changed, update it on the TV and reboot the TV.
 - **`tizen: command not found`:** add Tizen Studio's `tools/ide/bin` to your `PATH` (step 1).
 - **Black screen on launch:** connect DevTools as in step 7 and check the console for errors (the game ships as a single classic script, so a script load error or a JavaScript syntax error is the usual cause).
+- **No sound on the TV:** the game tries to start its audio at launch, and again on every phase change and whenever a phone joins, but a TV can keep audio locked until a button is pressed. Press any key on the TV remote once. Also check the TV volume and sound output (not muted, the right speakers selected, no Bluetooth device taking the sound). Note that the audio files are **silent placeholders** until you replace them with real recordings (see `docs/audio-assets.md`), so a working game with no sound is expected until then.
 
 ## First test: connectivity probe
 

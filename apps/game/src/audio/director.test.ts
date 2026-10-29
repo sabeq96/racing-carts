@@ -7,12 +7,13 @@ import { SoundDirector, type DirectorSource } from './director';
 let played: string[];
 let musicCalls: Array<string | null>;
 let engineCalls: Array<number | null>;
+let unlocks = 0;
 const audio: Audio = {
   load: async () => {},
   play: (n) => void played.push(n),
   music: (n) => void musicCalls.push(n),
   engine: (s) => void engineCalls.push(s),
-  unlock: () => {},
+  unlock: () => void unlocks++,
 };
 
 let walls: number[];
@@ -33,6 +34,7 @@ beforeEach(() => {
   played = [];
   musicCalls = [];
   engineCalls = [];
+  unlocks = 0;
   walls = [];
   bumps = [];
   sfx = [];
@@ -154,6 +156,15 @@ describe('frame', () => {
     expect(engineCalls[3]).toBeNull();
   });
 
+  test('rematch: the engine is switched off between races and on again, never doubled', () => {
+    speeds = [MAX_SPEED / 2, MAX_SPEED / 2];
+    for (const p of ['racing', 'racing', 'results', 'countdown', 'racing', 'racing'] as const) {
+      phase = p;
+      dir.frame(source, 0);
+    }
+    expect(engineCalls.map((c) => c !== null)).toEqual([true, true, false, false, true, true]);
+  });
+
   test('reversing karts count by their speed, and no karts means idle', () => {
     speeds = [-MAX_SPEED / 2, MAX_SPEED / 2];
     dir.frame(source, 0);
@@ -161,6 +172,24 @@ describe('frame', () => {
     speeds = [];
     dir.frame(source, 16);
     expect(engineCalls[1]).toBe(0);
+  });
+});
+
+describe('unlock retries', () => {
+  test('on each phase change and each player join, not on every frame', () => {
+    phase = 'lobby';
+    dir.frame(source, 0);
+    expect(unlocks).toBe(1); // the first frame is a phase "change"
+    for (let i = 1; i < 10; i++) dir.frame(source, i * 16);
+    expect(unlocks).toBe(1);
+    phase = 'countdown';
+    dir.frame(source, 200);
+    expect(unlocks).toBe(2);
+    phase = 'racing';
+    dir.frame(source, 216);
+    expect(unlocks).toBe(3);
+    dir.playerJoined();
+    expect(unlocks).toBe(4);
   });
 });
 
