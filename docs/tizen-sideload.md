@@ -42,7 +42,7 @@ npm install
 npm run build:tv
 ```
 
-This builds the game (`apps/game/dist`) and signs it into `apps/game/dist/RacingCarts.wgt`. To use a different certificate profile: `bash apps/game/scripts/package-tizen.sh MyProfile`.
+This builds the game (`apps/game/dist`) and signs it into `apps/game/dist/RacingCarts.wgt`. To use a different certificate profile: `bash scripts/build-tv.sh MyProfile`.
 
 ## 6. Install on the TV
 

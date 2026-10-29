@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Packages apps/game/dist into a signed Tizen .wgt.
-# Usage: bash apps/game/scripts/package-tizen.sh [certificate-profile]   (default: RacingCarts)
+# Builds the game and packages apps/game/dist into a signed Tizen .wgt.
+# Usage: bash scripts/build-tv.sh [certificate-profile]   (default: RacingCarts)
 set -euo pipefail
 
 PROFILE="${1:-RacingCarts}"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="$ROOT/apps/game/dist"
 
 if ! command -v tizen >/dev/null 2>&1; then
@@ -13,8 +13,10 @@ if ! command -v tizen >/dev/null 2>&1; then
   exit 1
 fi
 
+npm run build -w game
+
 if [ ! -f "$DIST/config.xml" ]; then
-  echo "error: $DIST/config.xml not found. Run 'npm run build -w game' first." >&2
+  echo "error: $DIST/config.xml not found after the game build." >&2
   exit 1
 fi
 
