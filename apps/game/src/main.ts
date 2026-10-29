@@ -49,8 +49,11 @@ function runGame(root: HTMLElement): void {
   // `?bots=N` limits the bots added on top of the humans; by default they fill every free slot.
   const botsParam = Number.parseInt(params.get('bots') ?? '', 10);
   const maxBots = Number.isFinite(botsParam) ? Math.max(0, Math.min(MAX_PLAYERS, botsParam)) : MAX_PLAYERS;
-  // Antialiasing is on unless `?aa=0` (an escape hatch if the TV GPU struggles).
-  const antialias = params.get('aa') !== '0';
+  // Antialiasing: off by default on the TV (its GPU is weak, and the packaged app has no query string),
+  // on elsewhere. `?aa=1` / `?aa=0` override either way.
+  const onTv = /Tizen|SMART-TV/i.test(navigator.userAgent);
+  const aaParam = params.get('aa');
+  const antialias = aaParam === '1' ? true : aaParam === '0' ? false : !onTv;
   // DEV ONLY (screenshots): `?keyboard=1&give=<item id>` hands the keyboard kart that item at GO.
   const giveItem = keyboardOn ? params.get('give') : null;
 
