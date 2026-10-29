@@ -156,3 +156,36 @@ test('broker drop triggers reconnect every 5 s until reconnected', async () => {
   expect(peer.reconnects).toBe(2);
   host.close();
 });
+
+test('a silent connection is dropped: phones send input at 30 Hz, so 4 s of silence means gone', async () => {
+  const onDisconnect = vi.fn();
+  const host = await startHost({ onHello: () => null, onMessage: () => {}, onDisconnect });
+  const c = new FakeConn();
+  FakePeer.last.emit('connection', c);
+  c.emit('data', hello('a'));
+  const input = { t: 'input', steer: 0, gas: false, brake: false, item: false };
+  for (let i = 0; i < 100; i++) {
+    vi.advanceTimersByTime(100);
+    c.emit('data', input);
+  }
+  expect(onDisconnect).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(3500);
+  expect(onDisconnect).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1500);
+  expect(onDisconnect).toHaveBeenCalledTimes(1);
+  expect(onDisconnect).toHaveBeenCalledWith('a');
+  expect(c.closed).toBe(true);
+  vi.advanceTimersByTime(10000);
+  expect(onDisconnect).toHaveBeenCalledTimes(1);
+  host.close();
+});
+
+test('a connection that never says hello is closed after the silence limit', async () => {
+  const onDisconnect = vi.fn();
+  await startHost({ onHello: () => null, onMessage: () => {}, onDisconnect });
+  const c = new FakeConn();
+  FakePeer.last.emit('connection', c);
+  vi.advanceTimersByTime(6000);
+  expect(c.closed).toBe(true);
+  expect(onDisconnect).not.toHaveBeenCalled();
+});

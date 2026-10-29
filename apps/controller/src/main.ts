@@ -147,8 +147,13 @@ function render(): void {
   if (screen === 'drive' && lastState) {
     const s = lastState;
     const inResults = s.phase === 'results';
+    // position 0: this phone has no kart in the current race (it joined a slot without one)
     els.statusText.textContent =
-      s.phase === 'countdown' ? 'Get ready!' : `${ordinal(s.position)} · Lap ${Math.min(s.lap, s.totalLaps)}/${s.totalLaps}`;
+      s.phase === 'countdown'
+        ? 'Get ready!'
+        : s.position > 0
+          ? `${ordinal(s.position)} · Lap ${Math.min(s.lap, s.totalLaps)}/${s.totalLaps}`
+          : 'Next race!';
 
     const empty = !s.rolling && !s.itemIcon;
     els.itemIcon.textContent = s.rolling ? '🎲' : (s.itemIcon ?? '🎁');
@@ -157,7 +162,8 @@ function render(): void {
 
     els.results.hidden = !inResults;
     if (inResults) {
-      els.resultText.textContent = `${s.position === 1 ? '🏆 ' : ''}You finished ${ordinal(s.position)}!`;
+      els.resultText.textContent =
+        s.position > 0 ? `${s.position === 1 ? '🏆 ' : ''}You finished ${ordinal(s.position)}!` : 'Race over!';
       els.rematchBtn.hidden = !s.isHost;
       els.resultWait.hidden = s.isHost;
     }

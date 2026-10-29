@@ -19,6 +19,13 @@ const MAX_CODE_ATTEMPTS = 20;
 const RECONNECT_MS = 5000;
 const REJECT_CLOSE_MS = 200;
 const BROKER_ERRORS = new Set(['network', 'server-error', 'socket-error']);
+/**
+ * A phone that vanishes (tab closed, screen locked, out of wifi) may never fire `close` on the TV's
+ * side of the data channel. Phones send `input` at 30 Hz in every phase, so this much silence means
+ * the phone is gone: close the connection (it reconnects with the same token if it was only asleep).
+ */
+const SILENCE_MS = 4000;
+const SILENCE_CHECK_MS = 1000;
 
 /** Opens a Peer under a fresh room code, retrying while the code is taken. */
 function openPeer(rand?: () => number): Promise<{ peer: Peer; code: string }> {
@@ -52,6 +59,12 @@ function openPeer(rand?: () => number): Promise<{ peer: Peer; code: string }> {
 export async function startHost(handlers: HostHandlers, rand?: () => number): Promise<NetHost> {
   const { peer, code } = await openPeer(rand);
   const conns = new Map<string, DataConnection>();
+  /** Every live connection (with or without hello) → when it last sent anything, and how to drop it. */
+  const live = new Map<DataConnection, { lastSeen: number; drop: () => void }>();
+  const silenceTimer = setInterval(() => {
+    const now = Date.now();
+    for (const l of live.values()) if (now - l.lastSeen > SILENCE_MS) l.drop();
+  }, SILENCE_CHECK_MS);
 
   // The broker socket can drop during a long session; keep the room reachable.
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -75,13 +88,28 @@ export async function startHost(handlers: HostHandlers, rand?: () => number): Pr
     let rejected = false;
 
     const dropped = (): void => {
+      live.delete(conn);
       if (token !== null && conns.get(token) === conn) {
         conns.delete(token);
         handlers.onDisconnect(token);
       }
     };
+    const entry = {
+      lastSeen: Date.now(),
+      drop: (): void => {
+        live.delete(conn);
+        try {
+          conn.close();
+        } catch {
+          // already gone
+        }
+        dropped(); // `close` may not fire for a dead channel; dropped() is idempotent
+      },
+    };
+    live.set(conn, entry);
 
     conn.on('data', (raw) => {
+      entry.lastSeen = Date.now();
       if (rejected) return;
       const msg = decodeClient(raw);
       if (token === null) {
@@ -124,6 +152,8 @@ export async function startHost(handlers: HostHandlers, rand?: () => number): Pr
       if (conn && conn.open) conn.send(msg);
     },
     close() {
+      clearInterval(silenceTimer);
+      live.clear();
       if (reconnectTimer !== null) clearTimeout(reconnectTimer);
       reconnectTimer = null;
       conns.clear();

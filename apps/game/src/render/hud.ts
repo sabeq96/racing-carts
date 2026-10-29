@@ -6,7 +6,11 @@ const PANEL = '#fffaf2';
 const RIM = '#f0dcc4';
 const CORAL = '#ff8a80';
 const MINT = '#3fae7f';
+const MINT_SOFT = '#dff5ea';
 const GO_HIDE_MS = 900;
+/** The message pill sits at the top, except in the lobby, where it goes between the join card and the slots. */
+const MESSAGE_TOP = '56px';
+const MESSAGE_TOP_LOBBY = '590px';
 
 const STYLE = `
 .rc-panel{background:${PANEL};border-radius:48px;box-shadow:0 12px 0 ${RIM};box-sizing:border-box;color:${INK};}
@@ -16,6 +20,24 @@ const STYLE = `
 `;
 
 type El = HTMLElement;
+
+export interface LobbySlot {
+  /** Player name; '' for an empty slot. */
+  name: string;
+  color: string;
+  /** For an empty slot: a bot will drive it (else it is free). For a player: they dropped and a bot drives. */
+  bot: boolean;
+  host: boolean;
+}
+
+interface LobbyUi {
+  code: El;
+  qr: HTMLImageElement;
+  qrSpot: El;
+  url: El;
+  hint: El;
+  slots: El;
+}
 
 export interface RaceRow {
   name: string;
@@ -47,6 +69,31 @@ function dot(color: string, size: number): El {
   return d;
 }
 
+/** One lobby slot: a big colour dot, the name, and a small tag (Host / Bot / Free). */
+function slotCard(s: LobbySlot): El {
+  const empty = s.name === '';
+  const card = el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;padding:28px 20px 24px;', undefined, 'rc-panel');
+  if (empty) {
+    card.style.background = s.bot ? '#fbf1e4' : 'rgba(255,250,242,.55)';
+    card.style.boxShadow = 'none';
+    card.style.border = `5px dashed ${RIM}`;
+  }
+  const d = dot(s.color, 84);
+  if (empty) d.style.opacity = s.bot ? '0.55' : '0.25';
+  card.append(d);
+  const label = empty ? (s.bot ? 'Bot' : 'Free') : s.name;
+  card.append(
+    el(
+      'div',
+      `max-width:100%;margin-top:14px;font-size:46px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${empty ? SOFT : INK};`,
+      label,
+    ),
+  );
+  const tag = s.host ? 'Host' : !empty && s.bot ? 'Bot' : '';
+  card.append(el('div', `height:34px;font-size:30px;font-weight:900;color:${s.host ? CORAL : SOFT};`, tag));
+  return card;
+}
+
 const ordinal = (n: number): string => {
   const s = n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th';
   return n + s;
@@ -63,6 +110,8 @@ export class Hud {
   private raceRows: RaceRow[] = [];
   private raceDirty = true;
   private goTimer: number | undefined;
+  private lobbyUi: LobbyUi | null = null;
+  private lobbyKey = '';
 
   constructor(private root: HTMLElement) {
     root.textContent = '';
@@ -84,7 +133,11 @@ export class Hud {
     this.resultsEl = layer('top:0;right:0;bottom:0;left:0;align-items:center;justify-content:center;');
     // Upper third, so the bubble never hides the karts the camera keeps centred.
     this.countdownEl = layer('left:0;right:0;top:110px;justify-content:center;');
-    this.messageEl = layer('left:0;right:0;top:56px;justify-content:center;');
+    this.messageEl = layer(`left:0;right:0;top:${MESSAGE_TOP};justify-content:center;`);
+  }
+
+  private placeMessage(top: string): void {
+    if (this.messageEl.style.top !== top) this.messageEl.style.top = top;
   }
 
   /** Writes `display` only when it changes (`race` runs every frame). */
@@ -93,45 +146,79 @@ export class Hud {
     if (node.style.display !== want) node.style.display = want;
   }
 
-  lobby(code: string, qrDataUrl: string, url: string, slots: { name: string; color: string; bot: boolean; host: boolean }[]): void {
+  /**
+   * Lobby: join card (room code, QR at its native pixel size, short URL), a host hint and a row of
+   * all slots. Cheap to call often: the DOM is built once and only touched when something changed.
+   * Empty slots have `name: ''`; `bot` then means a bot will drive that kart, otherwise it is free.
+   */
+  lobby(code: string, qrDataUrl: string, url: string, slots: readonly LobbySlot[], hint: string): void {
     this.show(this.raceEl, false);
     this.show(this.resultsEl, false);
+    this.raceDirty = true;
+    this.placeMessage(MESSAGE_TOP_LOBBY);
     const box = this.lobbyEl;
-    box.textContent = '';
-
-    const left = el(
-      'div',
-      'width:740px;padding:36px 44px;display:flex;flex-direction:column;align-items:center;',
-      undefined,
-      'rc-panel',
-    );
-    left.append(
-      el('div', `font-size:56px;font-weight:900;color:${CORAL};`, 'Racing Carts'),
-      el('div', `font-size:36px;color:${SOFT};margin-top:8px;`, 'Room code'),
-      el('div', 'font-size:160px;line-height:1.05;font-weight:900;letter-spacing:0.12em;padding-left:0.12em;', code),
-    );
-    if (qrDataUrl) {
-      const img = document.createElement('img');
-      img.alt = 'QR code to join';
-      img.style.cssText = 'image-rendering:pixelated;border-radius:24px;margin-top:12px;background:#fff;';
-      img.src = qrDataUrl;
-      left.append(img);
-    }
-    left.append(el('div', `font-size:26px;color:${SOFT};margin-top:16px;text-align:center;word-break:break-all;`, url.replace(/^https?:\/\//, '')));
-
-    const right = el('div', 'flex:1;display:grid;grid-template-columns:1fr 1fr;gap:28px;align-content:center;');
-    for (const s of slots) {
-      const card = el('div', 'display:flex;align-items:center;gap:24px;padding:26px 30px;', undefined, 'rc-panel');
-      if (s.bot) card.style.opacity = '0.7';
-      const text = el('div', 'display:flex;flex-direction:column;min-width:0;');
-      text.append(el('div', 'font-size:44px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;', s.name));
-      const tag = s.host ? 'Host' : s.bot ? 'Bot' : '';
-      if (tag) text.append(el('div', `font-size:28px;color:${s.host ? CORAL : SOFT};`, tag));
-      card.append(dot(s.color, 72), text);
-      right.append(card);
-    }
-    box.append(left, right);
     this.show(box, true);
+    const key = JSON.stringify([code, qrDataUrl, url, slots, hint]);
+    if (key === this.lobbyKey) return;
+    this.lobbyKey = key;
+    const ui = this.lobbyUi || (this.lobbyUi = this.buildLobby());
+
+    ui.code.textContent = code || '····';
+    ui.code.style.color = code ? INK : RIM;
+    ui.url.textContent = url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    if ((ui.qr.getAttribute('src') || '') !== qrDataUrl) {
+      // The placeholder stays until the new image has loaded (see onload).
+      ui.qr.style.display = 'none';
+      ui.qrSpot.style.display = 'block';
+      if (qrDataUrl) ui.qr.src = qrDataUrl;
+      else ui.qr.removeAttribute('src');
+    }
+    ui.hint.textContent = hint;
+    ui.hint.style.display = hint ? 'block' : 'none';
+
+    ui.slots.textContent = '';
+    for (const s of slots) ui.slots.append(slotCard(s));
+  }
+
+  private buildLobby(): LobbyUi {
+    const box = this.lobbyEl;
+    box.style.flexDirection = 'column';
+    box.style.justifyContent = 'space-between';
+
+    const top = el('div', 'display:flex;align-items:flex-start;justify-content:space-between;gap:40px;');
+    const card = el('div', 'flex:none;display:flex;align-items:center;gap:48px;padding:36px 56px 36px 36px;', undefined, 'rc-panel');
+    const qr = document.createElement('img');
+    qr.alt = 'QR code to join';
+    // Shown at exactly its own pixel size so the TV never rescales it by a fractional factor.
+    qr.style.cssText = 'display:none;image-rendering:pixelated;border-radius:20px;background:#fff;flex:none;';
+    const qrSpot = el('div', `width:320px;height:320px;border-radius:20px;background:${RIM};flex:none;`);
+    qr.onload = () => {
+      qr.style.width = `${qr.naturalWidth}px`;
+      qr.style.height = `${qr.naturalHeight}px`;
+      qr.style.display = 'block';
+      qrSpot.style.display = 'none';
+    };
+    const words = el('div', 'min-width:600px;display:flex;flex-direction:column;align-items:flex-start;');
+    const code = el('div', 'font-size:170px;line-height:1;font-weight:900;letter-spacing:0.1em;margin:6px 0 18px;white-space:nowrap;');
+    const url = el('div', `font-size:32px;color:${SOFT};`);
+    words.append(
+      el('div', `font-size:52px;font-weight:900;color:${CORAL};`, 'Racing Carts'),
+      el('div', `font-size:36px;color:${SOFT};margin-top:18px;`, 'Room code'),
+      code,
+      url,
+    );
+    card.append(qr, qrSpot, words);
+    // Usually one line; a long room code can squeeze it onto two, which still reads fine.
+    const hint = el(
+      'div',
+      `margin-top:24px;padding:22px 44px;font-size:42px;line-height:1.2;font-weight:900;color:#1f5a41;background:${MINT_SOFT};` +
+        `border-radius:56px;box-shadow:0 8px 0 #bfe6d2;text-align:center;min-width:0;`,
+    );
+    top.append(card, hint);
+
+    const slots = el('div', 'display:flex;gap:28px;');
+    box.append(top, slots);
+    return { code, qr, qrSpot, url, hint, slots };
   }
 
   countdown(n: number | 'GO'): void {
@@ -156,6 +243,7 @@ export class Hud {
     this.show(this.lobbyEl, false);
     this.show(this.resultsEl, false);
     this.show(this.raceEl, true);
+    this.placeMessage(MESSAGE_TOP);
     // Called every frame: only touch the DOM when a row changed.
     if (!this.raceDirty && sameRows(rows, this.raceRows)) return;
     this.raceDirty = false;
@@ -178,6 +266,7 @@ export class Hud {
   results(rows: { name: string; color: string }[], hostHint: string): void {
     this.show(this.lobbyEl, false);
     this.show(this.raceEl, false);
+    this.placeMessage(MESSAGE_TOP);
     this.raceDirty = true;
     const box = this.resultsEl;
     box.textContent = '';

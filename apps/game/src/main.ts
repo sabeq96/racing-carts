@@ -1,5 +1,6 @@
 import { Engine } from '@babylonjs/core/Engines/engine';
-import { MAX_PLAYERS, NEUTRAL_INPUT } from '@rc/shared';
+import QRCode from 'qrcode';
+import { CONTROLLER_URL, MAX_PLAYERS, controllerUrl } from '@rc/shared';
 import { runProbe } from './probe';
 import { Game, type Driver } from './game';
 import { FixedStepper } from './loop';
@@ -13,27 +14,31 @@ import { createScene } from './render/scene';
 import { KartViews } from './render/kartViews';
 import { CameraRig } from './render/camera';
 import { Hud, type RaceRow } from './render/hud';
+import { startHost, type NetHost } from './net/host';
+import { PlayerRegistry } from './net/players';
+import { KEYBOARD_TOKEN, Session } from './session';
 
 const hudRoot = document.getElementById('hud');
 if (!hudRoot) throw new Error('missing #hud');
 
 const params = new URLSearchParams(location.search);
 
-/** Bot names follow the slot colours. */
-const BOT_NAMES = ['Coral', 'Sky', 'Mint', 'Butter', 'Lavender', 'Peach'];
+/** How often phones get their `state` (only sent when it changed) and the lobby refreshes. */
+const SYNC_MS = 100;
+/** Wait before trying to open the room again after a failure. */
+const ROOM_RETRY_MS = 5000;
+/** QR image width in px; the library rounds down to whole pixels per module. */
+const QR_WIDTH = 320;
 
 function runGame(root: HTMLElement): void {
   const hud = new Hud(root);
   const canvas = document.getElementById('c') as HTMLCanvasElement;
 
-  // Keyboard is on by default for desktop dev; `?keyboard=0` turns it off.
-  const keyboardOn = params.get('keyboard') !== '0';
-  const humans = keyboardOn ? 1 : 0;
+  // `?keyboard=1` adds the desktop keyboard as a player (off by default: on the TV it would always be host).
+  const keyboardOn = params.get('keyboard') === '1';
+  // `?bots=N` limits the bots added on top of the humans; by default they fill every free slot.
   const botsParam = Number.parseInt(params.get('bots') ?? '', 10);
-  const bots = Number.isFinite(botsParam)
-    ? Math.max(0, Math.min(MAX_PLAYERS - humans, botsParam))
-    : MAX_PLAYERS - humans;
-  const slotCount = humans + bots;
+  const maxBots = Number.isFinite(botsParam) ? Math.max(0, Math.min(MAX_PLAYERS, botsParam)) : MAX_PLAYERS;
   // Antialiasing is on unless `?aa=0` (an escape hatch if the TV GPU struggles).
   const antialias = params.get('aa') !== '0';
 
@@ -47,18 +52,71 @@ function runGame(root: HTMLElement): void {
 
   const track = buildTrack(TRACK_V1);
   const game = new Game(track);
-  game.setupKarts(slotCount);
+  const registry = new PlayerRegistry();
+  const keyboard = keyboardOn ? createKeyboard() : null;
+  let net: NetHost | null = null;
+  const session = new Session(game, registry, (token, msg) => net?.send(token, msg), {
+    maxBots,
+    keyboard: keyboard ?? undefined,
+  });
+  const drivers = (id: number): Driver => session.driverFor(id);
+
+  // ----- room: code, QR and URL once the broker answers -----
+  let roomCode = '';
+  let roomUrl = '';
+  let qrDataUrl = '';
+  /** Why the room is not open yet; shown in the lobby and on results, not over the racing. */
+  let roomError: string | null = null;
+  let shownMessage: string | null = null;
+  const openRoom = (): void => {
+    startHost({
+      onHello: (token, name) => session.onHello(token, name),
+      onMessage: (token, msg) => session.onMessage(token, msg),
+      onDisconnect: (token) => session.onDisconnect(token),
+    }).then(
+      (h) => {
+        net = h;
+        roomCode = h.code;
+        // The QR carries the code; the short URL on screen is for typing (the page then asks for the code).
+        roomUrl = CONTROLLER_URL;
+        roomError = null;
+        QRCode.toDataURL(controllerUrl(h.code), { width: QR_WIDTH, margin: 1 }).then(
+          (data) => {
+            qrDataUrl = data;
+          },
+          () => {
+            qrDataUrl = ''; // the code and URL still let phones join
+          },
+        );
+      },
+      (err: unknown) => {
+        const reason = err instanceof Error ? err.message : String(err);
+        roomError = reason === 'broker-unreachable' ? "No internet — can't create room" : "Can't create room";
+        window.setTimeout(openRoom, ROOM_RETRY_MS);
+      },
+    );
+  };
+  openRoom();
+
+  /** Who can start or rematch, in few words. */
+  const hostHint = (lobby: boolean): string => {
+    const host = registry.hostToken();
+    if (host === null) return lobby ? 'Scan to join' : '';
+    if (host === KEYBOARD_TOKEN) return lobby ? 'Press Enter to start' : 'Press Enter to race again';
+    return lobby ? 'Host: tap Start on your phone' : 'Host: tap Rematch on your phone';
+  };
+
+  if (keyboard) {
+    // Same host-only path as a phone's Start / Rematch button.
+    keyboard.onEnter(() => {
+      session.onMessage(KEYBOARD_TOKEN, { t: game.race.phase === 'results' ? 'rematch' : 'start' });
+    });
+  }
 
   const scene = createScene(engine, track);
   const views = new KartViews(scene);
   const rig = new CameraRig(scene, track.bounds);
   const stepper = new FixedStepper(60);
-
-  const keyboard = keyboardOn ? createKeyboard() : null;
-  const keyboardDriver: Driver | null = keyboard ? { kind: 'human', name: 'Keyboard', input: () => keyboard.input() } : null;
-  const botDrivers = BOT_NAMES.map((name): Driver => ({ kind: 'bot', name, input: () => NEUTRAL_INPUT }));
-  // Kart 0 is the keyboard; the rest idle until bots arrive in Task 10.
-  const drivers = (id: number): Driver => (id === 0 && keyboardDriver) || botDrivers[id];
 
   // Reused every frame so the render loop does not allocate.
   const ranked: Kart[] = [];
@@ -80,17 +138,24 @@ function runGame(root: HTMLElement): void {
     return rows;
   };
 
-  if (keyboard) {
-    hud.message('Press Enter to start');
-    keyboard.onEnter(() => {
-      const phase = game.race.phase;
-      if (phase === 'results') game.setupKarts(slotCount);
-      if (phase === 'lobby' || phase === 'results') {
-        game.race.start();
-        hud.message(null);
-      }
-    });
-  }
+  // The results hint names whoever is host now, so redraw it if the host changes.
+  let resultsHint = '';
+  const showResults = (): void => {
+    resultsHint = hostHint(false);
+    hud.results(rowsFor(), resultsHint);
+  };
+
+  // Phones hear about changes every 100 ms; the lobby screen refreshes on the same beat.
+  const tick = (): void => {
+    session.syncPhones();
+    const phase = game.race.phase;
+    const message = phase === 'lobby' || phase === 'results' ? roomError : null;
+    if (message !== shownMessage) hud.message((shownMessage = message));
+    if (phase === 'lobby') hud.lobby(roomCode, qrDataUrl, roomUrl, session.lobbySlots(), hostHint(true));
+    else if (phase === 'results' && hostHint(false) !== resultsHint) showResults();
+  };
+  tick();
+  window.setInterval(tick, SYNC_MS);
 
   engine.runRenderLoop(() => {
     const dt = engine.getDeltaTime() / 1000;
@@ -98,9 +163,8 @@ function runGame(root: HTMLElement): void {
       for (const e of game.step(h, drivers)) {
         if (e.kind === 'countdown') hud.countdown(e.n);
         else if (e.kind === 'go') hud.countdown('GO');
-        else if (e.kind === 'results') {
-          hud.results(rowsFor(), keyboard ? 'Press Enter to race again' : '');
-        }
+        else if (e.kind === 'finish') session.sendEvent(e.kartId, 'finish');
+        else if (e.kind === 'results') showResults();
       }
     });
     const phase = game.race.phase;
@@ -109,7 +173,10 @@ function runGame(root: HTMLElement): void {
     views.update(game.karts);
     const humanIds = game.humanKartIds();
     framed.length = 0;
-    for (const k of game.karts) if (humanIds.length === 0 || humanIds.indexOf(k.id) >= 0) framed.push(k.pos);
+    // Lobby: the whole track (no points); then the camera eases in on the humans' karts.
+    if (phase !== 'lobby') {
+      for (const k of game.karts) if (humanIds.length === 0 || humanIds.indexOf(k.id) >= 0) framed.push(k.pos);
+    }
     rig.update(framed, engine.getAspectRatio(rig.camera), Math.min(0.1, dt));
     scene.render();
   });
