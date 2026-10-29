@@ -13,6 +13,10 @@ export const WALL_SPEED_KEEP = 0.8;
 export const WALL_SCRAPE = 1.2;
 export const SPIN_TIME = 1.2;
 export const BOOST_FACTOR = 1.6;
+/** Catch-up: top speed × (1 + CATCHUP × rank fraction), 0 for the leader up to +6 % for last place. */
+export const CATCHUP = 0.06;
+/** Catch-up pauses while a kart touches a wall and this many seconds after, so wall-riding never earns it. */
+export const CATCHUP_WALL_PAUSE = 2;
 
 /** Drift: starts with BRAKE + |steer| > DRIFT_START_STEER above DRIFT_START_SPEED (m/s), not while spinning. */
 export const DRIFT_START_STEER = 0.3;

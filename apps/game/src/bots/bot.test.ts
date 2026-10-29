@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { KART_COLORS, TOTAL_LAPS } from '@rc/shared';
 import { createKart, resolveKartCollisions, stepKart, type Kart } from '../kart/kart';
 import { wrapAngle } from '../math/vec2';
-import { MAX_SPEED } from '../kart/tuning';
+import { CATCHUP, MAX_SPEED } from '../kart/tuning';
 import { lapOf, updateProgress } from '../race/progress';
 import { buildTrack } from '../track/track';
 import { TRACK_V1 } from '../track/trackDef';
@@ -148,11 +148,11 @@ describe('botInput', () => {
 
 describe('steering matters', () => {
   /** Seconds a lone kart needs for TOTAL_LAPS laps on TRACK_V1 (Infinity if it never gets there in 3 min). */
-  function lapTime(drive: (k: Kart) => { steer: number; gas: boolean; brake: boolean; item: boolean }): number {
+  function lapTime(drive: (k: Kart) => { steer: number; gas: boolean; brake: boolean; item: boolean }, topSpeedScale = 1): number {
     const k = createKart(0, KART_COLORS[0], track.grid[0], track);
     const goal = TOTAL_LAPS * track.length;
     for (let t = 0; t < 180; t += DT) {
-      stepKart(k, drive(k), track, DT);
+      stepKart(k, drive(k), track, DT, topSpeedScale);
       updateProgress(k, track);
       if (k.distance >= goal) return t;
     }
@@ -167,6 +167,18 @@ describe('steering matters', () => {
     expect(bot).toBeLessThan(180);
     expect(gasOnly).toBeGreaterThan(bot);
   });
+
+  // Worst case for the guard above: the GAS-only kart sits in last place all race, so it is offered the
+  // full catch-up (+6 % top speed). Seeds 1, 10 and 12 give the quickest 0.82 bots.
+  for (const seed of [13, 1, 10, 12]) {
+    test(`even with full catch-up, a GAS-only kart is slower over 3 laps than a 0.82 bot (seed ${seed})`, () => {
+      const rand = mulberry32(seed);
+      const brain: BotBrain = { ...createBotBrain(rand), speedFactor: 0.82 };
+      const bot = lapTime((k) => botInput(brain, k, track, DT, rand));
+      const gasOnly = lapTime(() => ({ steer: 0, gas: true, brake: false, item: false }), 1 + CATCHUP);
+      expect(gasOnly).toBeGreaterThan(bot + 0.25);
+    });
+  }
 });
 
 describe('recovery from a bad pose', () => {

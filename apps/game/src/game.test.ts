@@ -5,6 +5,7 @@ import { TRACK_V1 } from './track/trackDef';
 import { Game, type Driver } from './game';
 import { MAX_SPEED } from './kart/tuning';
 import { mulberry32 } from './test/rand';
+import { botInput, createBotBrain } from './bots/bot';
 
 const track = buildTrack(TRACK_V1);
 const gas = { steer: 0, gas: true, brake: false, item: false };
@@ -223,3 +224,60 @@ test('a kart tucked in behind another during the race builds up draft in the gam
   expect(a.draft).toBeGreaterThan(0.1);
   expect(b.draft).toBe(0);
 });
+
+test('catch-up: while racing, last place tops out 6% faster than the leader (middle in between)', () => {
+  const g = new Game(track);
+  g.setupKarts(3);
+  const d = human(() => gas);
+  toRacing(g, d);
+  // On the start straight, 18 m apart (out of each other's slipstream) and off the boost pad's line.
+  const place: [number, number][] = [[16, -3], [-2, 3], [-20, 0]];
+  g.karts.forEach((k, i) => {
+    const [s, lateral] = place[i];
+    k.pos = track.pointAt(s, lateral);
+    k.heading = track.headingAt(s);
+    k.trackIndex = track.project(k.pos).index;
+    k.distance = s;
+    k.speed = MAX_SPEED;
+    k.vel = { x: Math.sin(k.heading) * MAX_SPEED, z: Math.cos(k.heading) * MAX_SPEED };
+  });
+  for (let i = 0; i < 90; i++) g.step(1 / 60, d);
+  const [leader, middle, last] = g.karts;
+  expect(leader.speed).toBeCloseTo(MAX_SPEED, 6);
+  expect(middle.speed).toBeCloseTo(MAX_SPEED * 1.03, 6);
+  expect(last.speed).toBeCloseTo(MAX_SPEED * 1.06, 6);
+});
+
+test('no catch-up outside the race: in the countdown every kart has the plain top speed', () => {
+  const g = new Game(track);
+  g.setupKarts(2);
+  g.race.start();
+  const d = human(() => gas);
+  g.karts[1].distance = -100; // far behind, but the race has not started
+  for (const k of g.karts) k.speed = MAX_SPEED + 0.1;
+  g.step(1 / 60, d);
+  // Just above the plain top speed both ease back to it (a raised cap would let the last kart coast instead).
+  expect(g.karts[0].speed).toBe(MAX_SPEED);
+  expect(g.karts[1].speed).toBe(MAX_SPEED);
+});
+
+// The whole batch at once (catch-up, pads, slipstream, items, collisions): riding the walls on GAS alone
+// must still lose to the relaxed bots.
+for (const seed of [1, 2, 3]) {
+  test(`in a full race a GAS-only human finishes behind every bot (seed ${seed})`, () => {
+    const rand = mulberry32(seed * 101);
+    const g = new Game(track, rand);
+    g.setupKarts(6);
+    const brains = g.karts.map(() => createBotBrain(rand));
+    const drivers = g.karts.map((k, i): Driver =>
+      i === 0
+        ? { kind: 'human', name: 'Gas', input: () => gas }
+        : { kind: 'bot', name: 'Bot', input: () => botInput(brains[i], g.karts[i], track, 1 / 60, rand, g.world) },
+    );
+    g.race.start();
+    for (let i = 0; i < 60 * 200 && g.race.phase !== 'results'; i++) g.step(1 / 60, (id) => drivers[id]);
+    const [human, ...bots] = g.karts;
+    expect(human.finishedAt).not.toBeNull();
+    for (const b of bots) expect(b.finishedAt as number).toBeLessThan(human.finishedAt as number);
+  });
+}

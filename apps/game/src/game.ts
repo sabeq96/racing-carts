@@ -1,7 +1,11 @@
 import { KART_COLORS, NEUTRAL_INPUT, type InputSnapshot } from '@rc/shared';
 import { createKart, resolveKartCollisions, stepKart, type Kart } from './kart/kart';
 import { stepSlipstream } from './kart/slipstream';
+import { CATCHUP } from './kart/tuning';
 import { ItemBoxes } from './powerups/itemBoxes';
+import { rankFraction } from './powerups/odds';
+import type { RollContext } from './powerups/types';
+import { compareRank } from './race/progress';
 import { BoostPads } from './race/boostPads';
 import { handleItemInput } from './powerups/useItem';
 import { createWorld, type World } from './powerups/world';
@@ -31,6 +35,10 @@ export class Game {
   private readonly isHuman = (id: number): boolean => this.humanIds.indexOf(id) >= 0;
   /** Each kart's input for the current step, reused. */
   private inputs: InputSnapshot[] = [];
+  /** Each kart's catch-up top speed scale for the current step, and the race order it comes from (reused). */
+  private topScale: number[] = [];
+  private ranked: Kart[] = [];
+  private rankCtx: RollContext = { position: 1, racerCount: 1 };
   /** Kart ids whose item roll finished since the last `drainItemGot`. */
   private itemGot: number[] = [];
   /** Kart ids that hit a wall / were bumped by another kart since the last drain (for sounds). */
@@ -62,7 +70,7 @@ export class Game {
   }
 
   /**
-   * One fixed step: inputs → item presses → physics → kart collisions → item boxes → boost pads →
+   * One fixed step: inputs → item presses → physics (with catch-up) → kart collisions → item boxes → boost pads →
    * slipstream → powerup world (entities, effects) → race (progress, laps, phases). Inputs, items included, only count
    * while racing.
    */
@@ -78,8 +86,9 @@ export class Game {
       inputs[i] = racing ? driver.input() : NEUTRAL_INPUT;
     }
     for (let i = 0; i < karts.length; i++) handleItemInput(karts[i], inputs[i].item, this.world);
+    this.updateCatchUp(racing);
     for (let i = 0; i < karts.length; i++) {
-      if (stepKart(karts[i], inputs[i], this.track, dt).hitWall) this.wallHits.push(karts[i].id);
+      if (stepKart(karts[i], inputs[i], this.track, dt, this.topScale[i]).hitWall) this.wallHits.push(karts[i].id);
     }
     for (const [a, b] of resolveKartCollisions(karts)) this.bumps.push(a, b);
     const got = this.itemBoxes.update(dt, karts, this.world, this.rand);
@@ -88,6 +97,38 @@ export class Game {
     stepSlipstream(karts, this.world, dt);
     this.world.step(dt);
     return this.race.update(dt, karts, this.track, this.isHuman);
+  }
+
+  /**
+   * Catch-up: while racing, each unfinished kart's top speed is scaled by 1 + CATCHUP × its rank fraction
+   * (0 for the leader, 1 for last place), so the back of the pack can close gaps. Allocation-free.
+   */
+  private updateCatchUp(racing: boolean): void {
+    const karts = this.karts;
+    const scale = this.topScale;
+    scale.length = karts.length;
+    for (let i = 0; i < karts.length; i++) scale[i] = 1;
+    if (!racing) return;
+    // Insertion sort into race order: a handful of karts, and no temporary arrays.
+    const ranked = this.ranked;
+    ranked.length = 0;
+    for (const k of karts) {
+      let j = ranked.length;
+      ranked.push(k);
+      while (j > 0 && compareRank(ranked[j - 1], k) > 0) {
+        ranked[j] = ranked[j - 1];
+        j--;
+      }
+      ranked[j] = k;
+    }
+    const ctx = this.rankCtx;
+    ctx.racerCount = ranked.length;
+    for (let r = 0; r < ranked.length; r++) {
+      const k = ranked[r];
+      if (k.finishedAt !== null) continue;
+      ctx.position = r + 1;
+      scale[karts.indexOf(k)] = 1 + CATCHUP * rankFraction(ctx);
+    }
   }
 
   /** Kart ids whose item roll finished since the last call (each → an `itemGot` event to that phone). */

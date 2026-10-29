@@ -5,6 +5,7 @@ import {
   ACCEL,
   BOOST_FACTOR,
   BRAKE_DECEL,
+  CATCHUP_WALL_PAUSE,
   COAST_DECEL,
   DRIFT_DRAG,
   DRIFT_END_SPEED,
@@ -51,6 +52,8 @@ export interface Kart {
   finishedAt: number | null;
   /** Power slide: BRAKE + steer at speed. `charge` is seconds drifted (pays a mini-turbo on release). */
   drift: { active: boolean; charge: number };
+  /** Seconds since the kart last touched a wall (catch-up waits CATCHUP_WALL_PAUSE after a touch). */
+  sinceWall: number;
   /** Seconds spent in another kart's slipstream (see `stepSlipstream`); render shows streaks above 0.2. */
   draft: number;
 }
@@ -72,6 +75,7 @@ export function createKart(id: number, color: string, slot: Track['grid'][number
     trackIndex: track.project(slot.pos).index,
     finishedAt: null,
     drift: { active: false, charge: 0 },
+    sinceWall: CATCHUP_WALL_PAUSE,
     draft: 0,
   };
 }
@@ -118,7 +122,17 @@ function approach(v: number, target: number, step: number): number {
   return v < target ? Math.min(target, v + step) : Math.max(target, v - step);
 }
 
-export function stepKart(k: Kart, input: InputSnapshot, track: Track, dt: number): { hitWall: boolean } {
+/**
+ * One physics step. `topSpeedScale` multiplies the top speed (catch-up for karts behind; 1 = plain), except
+ * while the kart touches a wall and CATCHUP_WALL_PAUSE seconds after; a boost multiplies on top of it.
+ */
+export function stepKart(
+  k: Kart,
+  input: InputSnapshot,
+  track: Track,
+  dt: number,
+  topSpeedScale = 1,
+): { hitWall: boolean } {
   const drift = k.drift;
   if (k.spin > 0) {
     if (drift.active) endDrift(k, true); // a spin-out loses the drift and its charge
@@ -135,7 +149,8 @@ export function stepKart(k: Kart, input: InputSnapshot, track: Track, dt: number
       drift.charge = 0;
     }
     const boost = effectLeft(k, 'boost') > 0;
-    const max = MAX_SPEED * (boost ? BOOST_FACTOR : 1);
+    const scale = k.sinceWall >= CATCHUP_WALL_PAUSE ? topSpeedScale : 1;
+    const max = MAX_SPEED * scale * (boost ? BOOST_FACTOR : 1);
     if (drift.active) {
       // A drift holds its speed: brake only means "slide", with a mild drag (or the usual ease-off above max).
       k.speed = k.speed > max ? Math.max(max, k.speed - ACCEL * dt) : k.speed - DRIFT_DRAG * dt;
@@ -166,7 +181,11 @@ export function stepKart(k: Kart, input: InputSnapshot, track: Track, dt: number
   const limit = track.width / 2 - KART_RADIUS;
   const pr = track.project(k.pos, k.trackIndex);
   k.trackIndex = pr.index;
-  if (Math.abs(pr.lateral) <= limit) return { hitWall: false };
+  if (Math.abs(pr.lateral) <= limit) {
+    k.sinceWall += dt;
+    return { hitWall: false };
+  }
+  k.sinceWall = 0;
 
   const h = track.headingAt(pr.s);
   const rx = Math.cos(h), rz = -Math.sin(h); // right of the track direction

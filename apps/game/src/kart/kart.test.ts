@@ -53,6 +53,39 @@ describe('kart physics', () => {
     expect(k.speed).toBeGreaterThanOrEqual(19.5);
   });
 
+  test('topSpeedScale scales top speed (catch-up), and boost on top of it', () => {
+    const k = freshKart();
+    let maxSeen = 0;
+    for (let i = 0; i < Math.round(5 / DT); i++) {
+      stepKart(k, gas, track, DT, 1.06);
+      maxSeen = Math.max(maxSeen, k.speed);
+    }
+    expect(maxSeen).toBeCloseTo(21.2, 6);
+    k.effects = [{ kind: 'boost', remaining: 99 }];
+    for (let i = 0; i < Math.round(3 / DT); i++) stepKart(k, gas, track, DT, 1.06);
+    expect(k.speed).toBeCloseTo(21.2 * 1.6, 6);
+  });
+
+  test('catch-up pauses while the kart touches a wall and for 2 s after (wall-riding earns none)', () => {
+    const { kart: k } = graze(0.2);
+    expect(k.sinceWall).toBe(0);
+    // Back in the middle of the road at top speed, flat out, with the catch-up scale on offer.
+    k.pos = track.pointAt(60, 0);
+    k.heading = track.headingAt(60);
+    k.trackIndex = track.project(k.pos).index;
+    k.speed = MAX_SPEED;
+    k.vel = { x: 0, z: MAX_SPEED };
+    let capped = 0;
+    for (let i = 0; i < Math.round(1.9 / DT); i++) {
+      stepKart(k, gas, track, DT, 1.06);
+      capped = Math.max(capped, k.speed);
+    }
+    expect(capped).toBe(MAX_SPEED);
+    expect(k.sinceWall).toBeCloseTo(1.9, 6);
+    for (let i = 0; i < Math.round(0.5 / DT); i++) stepKart(k, gas, track, DT, 1.06);
+    expect(k.speed).toBeCloseTo(MAX_SPEED * 1.06, 6);
+  });
+
   test('boost effect raises top speed to 32', () => {
     const k = freshKart();
     k.effects = [{ kind: 'boost', remaining: 99 }];
