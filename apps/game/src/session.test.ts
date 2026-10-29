@@ -23,10 +23,13 @@ const lastState = (token: string): StateMsg | undefined => {
 const gasRight: ClientMsg = { t: 'input', steer: 0.5, gas: true, brake: false, item: false };
 const gasOnly: InputSnapshot = { steer: 0, gas: true, brake: false, item: false };
 
+/** Fake clock (ms) handed to the session. */
+let clock = 0;
+
 function setup(maxBots = 6, keyboard?: { input(): InputSnapshot }) {
   const game = new Game(track);
   const registry = new PlayerRegistry();
-  const session = new Session(game, registry, send, { maxBots, keyboard });
+  const session = new Session(game, registry, send, { maxBots, keyboard, now: () => clock });
   return { game, registry, session };
 }
 
@@ -40,6 +43,7 @@ function stepFor(game: Game, session: Session, steps: number): void {
 
 beforeEach(() => {
   sent = [];
+  clock = 0;
 });
 
 test('hello → welcome with slot colour; 7th → lobbyFull', () => {
@@ -82,7 +86,10 @@ test('kart count is capped at 6 and always covers the highest human slot', () =>
   gap.session.onHello('a', 'Ada');
   gap.session.onHello('b', 'Bea');
   gap.session.onHello('c', 'Cy');
-  gap.session.onDisconnect('b'); // lobby: frees slot 1, Cy stays in slot 2
+  gap.session.onDisconnect('b');
+  clock = 15000;
+  gap.session.syncPhones(); // lobby grace over: slot 1 is free, Cy stays in slot 2
+  expect(gap.session.lobbySlots()[1]).toMatchObject({ name: '', bot: true }); // the gap gets a bot kart
   gap.session.onMessage('a', { t: 'start' });
   expect(gap.game.karts.map((k) => k.id)).toEqual([0, 1, 2]);
   expect(gap.session.driverFor(1).kind).toBe('bot');
@@ -195,6 +202,77 @@ test('host leaving mid-race passes host on; the old host rejoining is host again
   // joinOrder is kept on rejoin, so Ada is the earliest connected player again
   expect(lastState('a')?.isHost).toBe(true);
   expect(lastState('b')?.isHost).toBe(false);
+});
+
+test('syncPhones also resends unchanged state once a second, as a heartbeat for the phones', () => {
+  const { session } = setup(4);
+  session.onHello('a', 'Ada');
+  const base = statesTo('a').length;
+  for (let t = 100; t < 1000; t += 100) {
+    clock = t;
+    session.syncPhones();
+  }
+  expect(statesTo('a').length).toBe(base);
+  clock = 1000;
+  session.syncPhones();
+  expect(statesTo('a').length).toBe(base + 1);
+  clock = 1500;
+  session.onHello('b', 'Bea'); // a change goes out at once (racers: 2) and restarts the second
+  expect(statesTo('a').length).toBe(base + 2);
+  clock = 2400;
+  session.syncPhones();
+  expect(statesTo('a').length).toBe(base + 2);
+  clock = 2500;
+  session.syncPhones();
+  expect(statesTo('a').length).toBe(base + 3);
+  expect(lastState('a')?.racers).toBe(2);
+});
+
+test('a host who drops in the lobby keeps slot and host turn for 15 s', () => {
+  const { session } = setup(4);
+  session.onHello('a', 'Ada');
+  session.onHello('b', 'Bea');
+  clock = 1000;
+  session.onDisconnect('a');
+  expect(lastState('b')?.isHost).toBe(true); // a disconnected player is never host
+  expect(session.lobbySlots()[0]).toEqual({ name: 'Ada', color: KART_COLORS[0], bot: true, host: false });
+  clock = 10000;
+  session.syncPhones();
+  session.onHello('c', 'Cy');
+  expect(to('c')[0]).toMatchObject({ slot: 2 }); // Ada's slot is still held
+  sent = [];
+  expect(session.onHello('a', 'Ada')).toBeNull();
+  expect(to('a')[0]).toEqual({ t: 'welcome', slot: 0, color: KART_COLORS[0] });
+  expect(lastState('a')?.isHost).toBe(true);
+  expect(lastState('b')?.isHost).toBe(false);
+});
+
+test('after the lobby grace a dropped player is removed and their slot freed', () => {
+  const { game, session } = setup(0);
+  session.onHello('a', 'Ada');
+  session.onHello('b', 'Bea');
+  expect(game.karts).toHaveLength(2);
+  session.onDisconnect('b');
+  clock = 14999;
+  session.syncPhones();
+  expect(session.lobbySlots()[1].name).toBe('Bea');
+  clock = 15000;
+  session.syncPhones();
+  expect(session.lobbySlots()[1]).toMatchObject({ name: '', bot: false });
+  expect(game.karts).toHaveLength(1); // the lobby grid preview follows
+  expect(lastState('a')?.racers).toBe(1);
+  sent = [];
+  session.onHello('b', 'Bea'); // a fresh join now
+  expect(to('b')[0]).toMatchObject({ slot: 1 });
+});
+
+test('a network hello with the keyboard token is rejected', () => {
+  const { registry, session } = setup(4, { input: () => NEUTRAL_INPUT });
+  expect(session.onHello(KEYBOARD_TOKEN, 'Sneaky')).toEqual({ t: 'lobbyFull' });
+  expect(registry.byToken(KEYBOARD_TOKEN)?.name).toBe('Keyboard');
+  const noKeys = setup(4);
+  expect(noKeys.session.onHello(KEYBOARD_TOKEN, 'Sneaky')).toEqual({ t: 'lobbyFull' });
+  expect(noKeys.registry.all()).toEqual([]);
 });
 
 test('syncPhones sends state only when changed', () => {

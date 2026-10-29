@@ -114,6 +114,7 @@ export function runProbe(hud: HTMLElement): void {
   const open = (): void => {
     startHost({
       onHello(token, name) {
+        registry.purgeExpired(performance.now());
         const res = registry.join(token, name, phase);
         if (res === 'full') return { t: 'lobbyFull' };
         if (!dots.has(token)) {
@@ -142,7 +143,7 @@ export function runProbe(hud: HTMLElement): void {
         }
       },
       onDisconnect(token) {
-        registry.disconnect(token, phase);
+        registry.disconnect(token, phase, performance.now());
         if (phase === 'lobby') dots.delete(token);
         broadcast();
         refreshStatus();

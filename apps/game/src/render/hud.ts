@@ -11,6 +11,15 @@ const GO_HIDE_MS = 900;
 /** The message pill sits at the top, except in the lobby, where it goes between the join card and the slots. */
 const MESSAGE_TOP = '56px';
 const MESSAGE_TOP_LOBBY = '590px';
+/** The HUD is laid out on a fixed 1920×1080 stage, scaled uniformly (letterboxed) to the window. */
+export const STAGE_W = 1920;
+export const STAGE_H = 1080;
+
+/** Uniform scale and offsets that fit the stage into a w×h window, centred. */
+export function fitStage(w: number, h: number): { scale: number; x: number; y: number } {
+  const scale = Math.min(w / STAGE_W, h / STAGE_H);
+  return { scale, x: (w - STAGE_W * scale) / 2, y: (h - STAGE_H * scale) / 2 };
+}
 
 const STYLE = `
 .rc-panel{background:${PANEL};border-radius:48px;box-shadow:0 12px 0 ${RIM};box-sizing:border-box;color:${INK};}
@@ -25,7 +34,7 @@ export interface LobbySlot {
   /** Player name; '' for an empty slot. */
   name: string;
   color: string;
-  /** For an empty slot: a bot will drive it (else it is free). For a player: they dropped and a bot drives. */
+  /** For an empty slot: a bot will drive it (else it is free). For a player: they dropped (shown as away). */
   bot: boolean;
   host: boolean;
 }
@@ -69,7 +78,7 @@ function dot(color: string, size: number): El {
   return d;
 }
 
-/** One lobby slot: a big colour dot, the name, and a small tag (Host / Bot / Free). */
+/** One lobby slot: a big colour dot, the name (or Bot / Free), and a small tag (Host / Away). */
 function slotCard(s: LobbySlot): El {
   const empty = s.name === '';
   const card = el('div', 'flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;padding:28px 20px 24px;', undefined, 'rc-panel');
@@ -80,6 +89,8 @@ function slotCard(s: LobbySlot): El {
   }
   const d = dot(s.color, 84);
   if (empty) d.style.opacity = s.bot ? '0.55' : '0.25';
+  // A player who dropped (in the lobby: within the grace period) is dimmed until they are back.
+  if (!empty && s.bot) card.style.opacity = '0.5';
   card.append(d);
   const label = empty ? (s.bot ? 'Bot' : 'Free') : s.name;
   card.append(
@@ -89,7 +100,7 @@ function slotCard(s: LobbySlot): El {
       label,
     ),
   );
-  const tag = s.host ? 'Host' : !empty && s.bot ? 'Bot' : '';
+  const tag = s.host ? 'Host' : !empty && s.bot ? 'Away' : '';
   card.append(el('div', `height:34px;font-size:30px;font-weight:900;color:${s.host ? CORAL : SOFT};`, tag));
   return card;
 }
@@ -121,9 +132,22 @@ export class Hud {
       style.textContent = STYLE;
       document.head.appendChild(style);
     }
+    // Everything is laid out in 1920×1080 stage pixels; the stage is scaled to whatever CSS viewport
+    // the TV (or a laptop) reports, so the HUD looks the same everywhere.
+    const stage = el(
+      'div',
+      `position:absolute;left:0;top:0;width:${STAGE_W}px;height:${STAGE_H}px;overflow:hidden;transform-origin:0 0;`,
+    );
+    root.appendChild(stage);
+    const fit = (): void => {
+      const f = fitStage(root.clientWidth || window.innerWidth, root.clientHeight || window.innerHeight);
+      stage.style.transform = `translate(${f.x}px,${f.y}px) scale(${f.scale})`;
+    };
+    fit();
+    window.addEventListener('resize', fit);
     const layer = (css: string): El => {
       const d = el('div', 'position:absolute;display:none;' + css);
-      root.appendChild(d);
+      stage.appendChild(d);
       return d;
     };
     // Explicit edges, not `inset`: that shorthand arrived in Chrome 87 and the TV is ~Chrome 85.
@@ -147,7 +171,7 @@ export class Hud {
   }
 
   /**
-   * Lobby: join card (room code, QR at its native pixel size, short URL), a host hint and a row of
+   * Lobby: join card (room code, QR at its own pixel size on the stage, short URL), a host hint and a row of
    * all slots. Cheap to call often: the DOM is built once and only touched when something changed.
    * Empty slots have `name: ''`; `bot` then means a bot will drive that kart, otherwise it is free.
    */
@@ -189,7 +213,8 @@ export class Hud {
     const card = el('div', 'flex:none;display:flex;align-items:center;gap:48px;padding:36px 56px 36px 36px;', undefined, 'rc-panel');
     const qr = document.createElement('img');
     qr.alt = 'QR code to join';
-    // Shown at exactly its own pixel size so the TV never rescales it by a fractional factor.
+    // Shown at its own pixel size on the stage (exactly native when the stage scale is 1, i.e. a
+    // 1920×1080 viewport); `pixelated` keeps the modules crisp otherwise.
     qr.style.cssText = 'display:none;image-rendering:pixelated;border-radius:20px;background:#fff;flex:none;';
     const qrSpot = el('div', `width:320px;height:320px;border-radius:20px;background:${RIM};flex:none;`);
     qr.onload = () => {

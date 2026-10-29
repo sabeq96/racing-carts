@@ -10,6 +10,12 @@ export interface Link {
 
 const RETRY_MS = 2000;
 const DIAL_TIMEOUT_MS = 10000;
+/**
+ * The TV resends `state` at least once a second. A data channel can die without a `close` event
+ * (TV asleep, wifi gone), so this much silence on an open channel counts as dropped.
+ */
+const SILENCE_MS = 5000;
+const WATCH_MS = 1000;
 
 /**
  * Connects to the TV host for `code`. Sends `hello` every time the data channel opens, and keeps
@@ -26,6 +32,11 @@ export function connect(
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let dialTimer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
+  /** When the open channel last delivered anything (performance.now), or null while not open. */
+  let lastHeard: number | null = null;
+  const watchdog = setInterval(() => {
+    if (conn && conn.open && lastHeard !== null && performance.now() - lastHeard > SILENCE_MS) scheduleRetry();
+  }, WATCH_MS);
 
   const link: Link = {
     status: 'connecting',
@@ -39,6 +50,7 @@ export function connect(
     },
     close() {
       closed = true;
+      clearInterval(watchdog);
       clearTimeout(retryTimer);
       retryTimer = undefined;
       dropConn();
@@ -55,6 +67,7 @@ export function connect(
 
   const dropConn = (): void => {
     clearTimeout(dialTimer);
+    lastHeard = null;
     const old = conn;
     conn = null;
     if (old) {
@@ -87,11 +100,13 @@ export function connect(
     c.on('open', () => {
       if (conn !== c) return;
       clearTimeout(dialTimer);
+      lastHeard = performance.now();
       c.send({ t: 'hello', token: hello.token, name: hello.name } satisfies ClientMsg);
       setStatus('open');
     });
     c.on('data', (raw) => {
       if (conn !== c) return;
+      lastHeard = performance.now();
       const m = decodeServer(raw);
       if (m) onMsg(m);
     });

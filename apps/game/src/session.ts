@@ -23,7 +23,12 @@ export interface SessionOptions {
   /** Bots added on top of the humans when a race starts (capped at MAX_PLAYERS karts in total). */
   maxBots: number;
   keyboard?: { input(): InputSnapshot };
+  /** Clock in ms (default `performance.now`); injectable for tests. */
+  now?: () => number;
 }
+
+/** Unchanged state is still resent this often, so a phone can tell a quiet TV from a lost one. */
+export const STATE_HEARTBEAT_MS = 1000;
 
 /**
  * Glue between the network (tokens and messages), the player registry and the game: who drives
@@ -32,8 +37,9 @@ export interface SessionOptions {
 export class Session {
   /** Latest input per token, only filled while racing. */
   private inputs = new Map<string, InputSnapshot>();
-  /** JSON of the last `state` sent per token, so unchanged state is not resent. */
-  private lastSent = new Map<string, string>();
+  /** JSON and time of the last `state` sent per token: unchanged state is only resent as a heartbeat. */
+  private lastSent = new Map<string, { json: string; at: number }>();
+  private readonly now: () => number;
   /** One reusable driver per token / slot, so the render loop allocates nothing. */
   private humanDrivers = new Map<string, Driver>();
   private botDrivers: Driver[];
@@ -44,12 +50,15 @@ export class Session {
     private send: (token: string, msg: ServerMsg) => void,
     private opts: SessionOptions,
   ) {
+    this.now = opts.now ?? (() => performance.now());
     this.botDrivers = BOT_NAMES.map((name): Driver => ({ kind: 'bot', name, input: () => NEUTRAL_INPUT }));
     if (opts.keyboard) registry.join(KEYBOARD_TOKEN, 'Keyboard', game.race.phase);
     this.refreshLobbyKarts();
   }
 
   onHello(token: string, name: string): ServerMsg | null {
+    if (token === KEYBOARD_TOKEN) return { t: 'lobbyFull' }; // reserved for the TV's own keyboard
+    this.purgeExpired();
     const res = this.registry.join(token, name, this.game.race.phase);
     if (res === 'full') return { t: 'lobbyFull' };
     this.inputs.delete(token);
@@ -83,7 +92,8 @@ export class Session {
   }
 
   onDisconnect(token: string): void {
-    this.registry.disconnect(token, this.game.race.phase);
+    // In the lobby the slot is held for a grace period, so a phone that blips keeps its place.
+    this.registry.disconnect(token, this.game.race.phase, this.now());
     this.inputs.delete(token);
     this.lastSent.delete(token);
     this.refreshLobbyKarts();
@@ -114,8 +124,14 @@ export class Session {
     return bot;
   }
 
-  /** Sends `state` to every connected phone whose state changed since the last send. */
+  /**
+   * Sends `state` to every connected phone whose state changed, and resends it unchanged at least
+   * every STATE_HEARTBEAT_MS (the phone treats a silent TV as a lost connection). In the lobby it
+   * also removes players whose grace period ran out.
+   */
   syncPhones(): void {
+    const now = this.now();
+    this.purgeExpired();
     const karts = this.game.karts;
     const lobby = this.game.race.phase === 'lobby';
     const ranked = lobby ? [] : rankKarts(karts);
@@ -139,8 +155,9 @@ export class Session {
         rolling: false,
       };
       const json = JSON.stringify(msg);
-      if (this.lastSent.get(p.token) === json) continue;
-      this.lastSent.set(p.token, json);
+      const last = this.lastSent.get(p.token);
+      if (last && last.json === json && now - last.at < STATE_HEARTBEAT_MS) continue;
+      this.lastSent.set(p.token, { json, at: now });
       this.send(p.token, msg);
     }
   }
@@ -190,6 +207,18 @@ export class Session {
     this.inputs.clear();
     this.game.race.start();
     this.syncPhones();
+  }
+
+  /** Lobby only: drops players whose grace period ran out (afterwards a dropped slot is kept for good). */
+  private purgeExpired(): void {
+    if (this.game.race.phase !== 'lobby') return;
+    const gone = this.registry.purgeExpired(this.now());
+    if (gone.length === 0) return;
+    for (const t of gone) {
+      this.lastSent.delete(t);
+      this.humanDrivers.delete(t);
+    }
+    this.refreshLobbyKarts();
   }
 
   /** In the lobby the grid previews the lineup, so a kart appears as each player joins. */

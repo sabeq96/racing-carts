@@ -21,10 +21,13 @@ const REJECT_CLOSE_MS = 200;
 const BROKER_ERRORS = new Set(['network', 'server-error', 'socket-error']);
 /**
  * A phone that vanishes (tab closed, screen locked, out of wifi) may never fire `close` on the TV's
- * side of the data channel. Phones send `input` at 30 Hz in every phase, so this much silence means
- * the phone is gone: close the connection (it reconnects with the same token if it was only asleep).
+ * side of the data channel. Phones send `input` at 30 Hz in every phase, so this much silence after
+ * hello means the phone is gone: close the connection (it redials with the same token if it was only
+ * asleep). The clock starts when the data channel opens, so slow networks (TURN, mobile data) can join.
  */
-const SILENCE_MS = 4000;
+const SILENCE_MS = 6000;
+/** An open connection gets this long to say hello. */
+const HELLO_MS = 15000;
 const SILENCE_CHECK_MS = 1000;
 
 /** Opens a Peer under a fresh room code, retrying while the code is taken. */
@@ -59,11 +62,15 @@ function openPeer(rand?: () => number): Promise<{ peer: Peer; code: string }> {
 export async function startHost(handlers: HostHandlers, rand?: () => number): Promise<NetHost> {
   const { peer, code } = await openPeer(rand);
   const conns = new Map<string, DataConnection>();
-  /** Every live connection (with or without hello) → when it last sent anything, and how to drop it. */
-  const live = new Map<DataConnection, { lastSeen: number; drop: () => void }>();
+  /**
+   * Every connection → when it last sent anything (null until its data channel opens), its limit
+   * (HELLO_MS before hello, SILENCE_MS after) and how to drop it. `performance.now()` is monotonic,
+   * so a wall-clock change on the TV cannot drop everyone at once.
+   */
+  const live = new Map<DataConnection, { lastSeen: number | null; limit: number; drop: () => void }>();
   const silenceTimer = setInterval(() => {
-    const now = Date.now();
-    for (const l of live.values()) if (now - l.lastSeen > SILENCE_MS) l.drop();
+    const now = performance.now();
+    for (const l of live.values()) if (l.lastSeen !== null && now - l.lastSeen > l.limit) l.drop();
   }, SILENCE_CHECK_MS);
 
   // The broker socket can drop during a long session; keep the room reachable.
@@ -95,7 +102,8 @@ export async function startHost(handlers: HostHandlers, rand?: () => number): Pr
       }
     };
     const entry = {
-      lastSeen: Date.now(),
+      lastSeen: conn.open ? performance.now() : (null as number | null),
+      limit: HELLO_MS,
       drop: (): void => {
         live.delete(conn);
         try {
@@ -107,9 +115,12 @@ export async function startHost(handlers: HostHandlers, rand?: () => number): Pr
       },
     };
     live.set(conn, entry);
+    conn.on('open', () => {
+      entry.lastSeen = performance.now();
+    });
 
     conn.on('data', (raw) => {
-      entry.lastSeen = Date.now();
+      entry.lastSeen = performance.now();
       if (rejected) return;
       const msg = decodeClient(raw);
       if (token === null) {
@@ -135,6 +146,7 @@ export async function startHost(handlers: HostHandlers, rand?: () => number): Pr
           return;
         }
         if (previous && previous !== conn) previous.close(); // its close event is ignored: no longer current
+        entry.limit = SILENCE_MS;
         return;
       }
       if (!msg || msg.t === 'hello') return;

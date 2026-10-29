@@ -6,10 +6,31 @@ test('slots fill lowest-first and cap at 6', () => {
   for (let i = 0; i < 6; i++) expect(r.join('t' + i, 'P' + i, 'lobby')).toEqual({ slot: i, rejoined: false });
   expect(r.join('t6', 'P6', 'lobby')).toBe('full');
 });
-test('lobby disconnect frees slot; next join reuses lowest free slot', () => {
+test('lobby disconnect frees the slot only after the 15 s grace; next join reuses lowest free slot', () => {
   const r = new PlayerRegistry(); r.join('a', 'A', 'lobby'); r.join('b', 'B', 'lobby');
-  r.disconnect('a', 'lobby');
-  expect(r.join('c', 'C', 'lobby')).toEqual({ slot: 0, rejoined: false });
+  r.disconnect('a', 'lobby', 1000);
+  expect(r.bySlot(0)).toMatchObject({ token: 'a', connected: false });
+  expect(r.purgeExpired(15999)).toEqual([]);
+  expect(r.join('c', 'C', 'lobby')).toEqual({ slot: 2, rejoined: false });
+  expect(r.purgeExpired(16000)).toEqual(['a']);
+  expect(r.bySlot(0)).toBeUndefined();
+  expect(r.join('d', 'D', 'lobby')).toEqual({ slot: 0, rejoined: false });
+});
+test('lobby rejoin within grace keeps slot and join order, so the host comes back as host', () => {
+  const r = new PlayerRegistry(); r.join('a', 'A', 'lobby'); r.join('b', 'B', 'lobby');
+  r.disconnect('a', 'lobby', 0);
+  expect(r.hostToken()).toBe('b'); // in grace, but not connected
+  expect(r.join('a', 'A2', 'lobby')).toEqual({ slot: 0, rejoined: true });
+  expect(r.byToken('a')).toMatchObject({ name: 'A2', connected: true });
+  expect(r.hostToken()).toBe('a');
+  expect(r.purgeExpired(60000)).toEqual([]); // back in time: no longer expiring
+  expect(r.bySlot(0)?.token).toBe('a');
+});
+test('a disconnect outside the lobby never expires', () => {
+  const r = new PlayerRegistry(); r.join('a', 'A', 'lobby');
+  r.disconnect('a', 'racing', 0);
+  expect(r.purgeExpired(1e9)).toEqual([]);
+  expect(r.bySlot(0)?.connected).toBe(false);
 });
 test('mid-race disconnect keeps slot; same token rejoins same slot', () => {
   const r = new PlayerRegistry(); r.join('a', 'A', 'lobby'); r.join('b', 'B', 'lobby');

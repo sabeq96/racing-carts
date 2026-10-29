@@ -362,6 +362,10 @@ function onServerMsg(m: ServerMsg): void {
 
 // ---------- input sending ----------
 
+/**
+ * Also the TV's heartbeat: the TV drops a phone that is silent for a few seconds, so this must keep
+ * running in every phase (lobby, countdown, results too), not only while driving.
+ */
 function sendInput(): void {
   const steer = currentSteer();
   showMeter(steer);
