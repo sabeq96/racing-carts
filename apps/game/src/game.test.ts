@@ -140,3 +140,51 @@ test('effects tick down in the game step', () => {
   for (let i = 0; i < 30; i++) g.step(1 / 60, d);
   expect(g.world.hasEffect(g.karts[0], 'shield')).toBe(false);
 });
+
+test('wall hits and kart bumps are reported once per drain, per kart id', () => {
+  const g = new Game(track);
+  g.setupKarts(2);
+  g.race.start();
+  const d = drivers([0]);
+  while (g.race.phase !== 'racing') g.step(1 / 60, d);
+  expect(g.drainWallHits()).toEqual([]);
+  expect(g.drainKartBumps()).toEqual([]);
+
+  // Kart 0 hurtles at the left wall.
+  const k = g.karts[0];
+  const s = 50;
+  k.pos = track.pointAt(s, 4.9);
+  k.heading = track.headingAt(s) + Math.PI / 2;
+  k.speed = 15;
+  k.vel = { x: Math.sin(k.heading) * 15, z: Math.cos(k.heading) * 15 };
+  k.trackIndex = track.project(k.pos).index;
+  // Kart 1 waits far away from the wall.
+  g.karts[1].pos = track.pointAt(200, 0);
+  g.karts[1].trackIndex = track.project(g.karts[1].pos).index;
+  for (let i = 0; i < 10; i++) g.step(1 / 60, d);
+  expect(g.drainWallHits()).toContain(0);
+  expect(g.drainWallHits()).toEqual([]); // drained
+
+  // Park both karts mid-road, one metre apart (the collision radius is 2 m for a pair).
+  for (const [i, lateral] of [[0, -0.5], [1, 0.5]] as const) {
+    const kart = g.karts[i];
+    kart.pos = track.pointAt(300, lateral);
+    kart.trackIndex = track.project(kart.pos).index;
+    kart.speed = 0;
+    kart.vel = { x: 0, z: 0 };
+  }
+  g.drainWallHits();
+  g.step(1 / 60, d);
+  const bumped = [...g.drainKartBumps()].sort();
+  expect(bumped).toEqual([0, 1]);
+  expect(g.drainKartBumps()).toEqual([]);
+});
+
+test('setupKarts forgets undelivered wall hits and bumps', () => {
+  const g = new Game(track);
+  g.setupKarts(2);
+  g.karts[1].pos = { x: g.karts[0].pos.x + 0.2, z: g.karts[0].pos.z };
+  g.step(1 / 60, drivers([]));
+  g.setupKarts(2);
+  expect(g.drainKartBumps()).toEqual([]);
+});

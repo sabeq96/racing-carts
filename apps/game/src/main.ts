@@ -19,6 +19,8 @@ import { Hud, type RaceRow } from './render/hud';
 import { startHost, type NetHost } from './net/host';
 import { PlayerRegistry } from './net/players';
 import { KEYBOARD_TOKEN, Session } from './session';
+import { createAudio } from './audio/audio';
+import { SoundDirector } from './audio/director';
 
 const hudRoot = document.getElementById('hud');
 if (!hudRoot) throw new Error('missing #hud');
@@ -34,8 +36,8 @@ const QR_WIDTH = 320;
 /** Shown in the TV race list while a kart's item roulette spins (the phones show the same). */
 const ROLLING_ICON = '🎲';
 
-/** Sound effects queued by the powerup world each frame. Audio arrives in Task 13; until then they are dropped. */
-function playSfx(_names: readonly string[]): void {}
+/** Where the sound files are, relative to the page (copied from public/audio to dist/audio). */
+const AUDIO_URL = 'audio/';
 
 function runGame(root: HTMLElement): void {
   const hud = new Hud(root);
@@ -59,6 +61,12 @@ function runGame(root: HTMLElement): void {
     return;
   }
 
+  // Sound never blocks or breaks the game: files that fail to load just stay silent.
+  const audio = createAudio(AUDIO_URL);
+  const sounds = new SoundDirector(audio);
+  audio.unlock(); // resumes now (works on the TV), else on the first key or pointer press
+  void audio.load();
+
   const track = buildTrack(TRACK_V1);
   const game = new Game(track);
   const registry = new PlayerRegistry();
@@ -67,6 +75,7 @@ function runGame(root: HTMLElement): void {
   const session = new Session(game, registry, (token, msg) => net?.send(token, msg), {
     maxBots,
     keyboard: keyboard ?? undefined,
+    onJoin: () => sounds.playerJoined(),
   });
   const drivers = (id: number): Driver => session.driverFor(id);
 
@@ -171,6 +180,7 @@ function runGame(root: HTMLElement): void {
     const dt = engine.getDeltaTime() / 1000;
     stepper.advance(dt, (h) => {
       for (const e of game.step(h, drivers)) {
+        sounds.raceEvent(e, game.humanKartIds());
         if (e.kind === 'countdown') hud.countdown(e.n);
         else if (e.kind === 'go') {
           hud.countdown('GO');
@@ -185,7 +195,7 @@ function runGame(root: HTMLElement): void {
       }
       session.flushKartEvents();
     });
-    playSfx(game.world.drainSfx());
+    sounds.frame(game, performance.now());
     const phase = game.race.phase;
     if (phase === 'countdown' || phase === 'racing') hud.race(rowsFor());
 

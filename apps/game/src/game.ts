@@ -30,6 +30,9 @@ export class Game {
   private inputs: InputSnapshot[] = [];
   /** Kart ids whose item roll finished since the last `drainItemGot`. */
   private itemGot: number[] = [];
+  /** Kart ids that hit a wall / were bumped by another kart since the last drain (for sounds). */
+  private wallHits: number[] = [];
+  private bumps: number[] = [];
 
   constructor(track: Track, private readonly rand: () => number = Math.random) {
     this.track = track;
@@ -49,6 +52,8 @@ export class Game {
     this.world = createWorld(this.karts, this.track);
     this.itemBoxes = new ItemBoxes(this.track);
     this.itemGot.length = 0;
+    this.wallHits.length = 0;
+    this.bumps.length = 0;
   }
 
   /**
@@ -67,8 +72,10 @@ export class Game {
       inputs[i] = racing ? driver.input() : NEUTRAL_INPUT;
     }
     for (let i = 0; i < karts.length; i++) handleItemInput(karts[i], inputs[i].item, this.world);
-    for (let i = 0; i < karts.length; i++) stepKart(karts[i], inputs[i], this.track, dt);
-    resolveKartCollisions(karts);
+    for (let i = 0; i < karts.length; i++) {
+      if (stepKart(karts[i], inputs[i], this.track, dt).hitWall) this.wallHits.push(karts[i].id);
+    }
+    for (const [a, b] of resolveKartCollisions(karts)) this.bumps.push(a, b);
     const got = this.itemBoxes.update(dt, karts, this.world, this.rand);
     for (const id of got) this.itemGot.push(id);
     this.world.step(dt);
@@ -80,6 +87,22 @@ export class Game {
     if (this.itemGot.length === 0) return NO_IDS;
     const out = this.itemGot;
     this.itemGot = [];
+    return out;
+  }
+
+  /** Ids of karts that hit a wall since the last call (an id repeats per hit). */
+  drainWallHits(): readonly number[] {
+    if (this.wallHits.length === 0) return NO_IDS;
+    const out = this.wallHits;
+    this.wallHits = [];
+    return out;
+  }
+
+  /** Ids of karts that bumped another kart since the last call (both karts of a pair; an id repeats per bump). */
+  drainKartBumps(): readonly number[] {
+    if (this.bumps.length === 0) return NO_IDS;
+    const out = this.bumps;
+    this.bumps = [];
     return out;
   }
 

@@ -34,6 +34,8 @@ export interface SessionOptions {
   /** Bots added on top of the humans when a race starts (capped at MAX_PLAYERS karts in total). */
   maxBots: number;
   keyboard?: { input(): InputSnapshot };
+  /** Called once for each new phone that gets a slot (not for a returning phone or the keyboard); used for a sound. */
+  onJoin?: (token: string) => void;
   /** Clock in ms (default `performance.now`); injectable for tests. */
   now?: () => number;
   /** Random source for bot personalities (default `Math.random`); injectable for tests. */
@@ -83,6 +85,7 @@ export class Session {
     this.send(token, { t: 'welcome', slot: res.slot, color: KART_COLORS[res.slot] });
     this.refreshLobbyKarts();
     this.syncPhones();
+    if (!res.rejoined) this.opts.onJoin?.(token);
     return null;
   }
 

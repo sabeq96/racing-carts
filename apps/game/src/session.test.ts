@@ -537,3 +537,27 @@ test('a phone holding the item button reads as held across steps (one press only
   }
   expect(k.item).toBe('shield'); // never a second rising edge while held
 });
+
+test('onJoin fires for a new phone only, not for a rejoin, a full lobby or the keyboard', () => {
+  const joins: string[] = [];
+  const game = new Game(track, mulberry32(7));
+  const session = new Session(game, new PlayerRegistry(), send, {
+    maxBots: 0,
+    keyboard: { input: () => gasOnly },
+    now: () => clock,
+    rand: mulberry32(42),
+    onJoin: (token) => joins.push(token),
+  });
+  expect(joins).toEqual([]); // the keyboard joining at boot is silent
+  session.onHello('a', 'Ann');
+  expect(joins).toEqual(['a']);
+  session.onDisconnect('a');
+  session.onHello('a', 'Ann');
+  expect(joins).toEqual(['a']); // same phone coming back
+  for (const t of ['b', 'c', 'd', 'e']) session.onHello(t, t);
+  expect(joins).toHaveLength(5);
+  // Slots 0-5 are taken: the keyboard and five phones.
+  expect(session.onHello('f', 'Late')).toEqual({ t: 'lobbyFull' });
+  session.onHello(KEYBOARD_TOKEN, 'Sneaky');
+  expect(joins).toHaveLength(5);
+});
