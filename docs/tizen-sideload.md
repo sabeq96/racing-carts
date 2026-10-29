@@ -121,7 +121,7 @@ The fix may need PeerJS's adapter to be told the browser details (Chrome, versio
 
 ## Deploying the phone controller (GitHub Pages)
 
-The controller is deployed by `.github/workflows/deploy-controller.yml` on every push to `main` (or by hand from the Actions tab). One-time setup in the GitHub repository:
+The controller and the web build of the game are deployed by `.github/workflows/deploy-web.yml` on every push to `main` (or by hand from the Actions tab). One-time setup in the GitHub repository:
 
 Free GitHub Pages needs a **public** repository; Pages from a private repository needs a paid GitHub plan.
 
