@@ -356,6 +356,8 @@ export class Hud {
     this.raceRows = rows.map((r) => ({ name: r.name, color: r.color, lap: r.lap, item: r.item, finished: r.finished }));
     const box = this.raceEl;
     box.textContent = '';
+    // "Lap" over the column of lap counters ("Lap 1/3" on every row would squeeze the names).
+    box.append(el('div', `font-size:28px;font-weight:900;color:${SOFT};text-align:right;height:30px;line-height:30px;`, 'Lap'));
     rows.forEach((r, i) => {
       const row = el('div', 'display:flex;align-items:center;gap:16px;height:62px;');
       row.append(
