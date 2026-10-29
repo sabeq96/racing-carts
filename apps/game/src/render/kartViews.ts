@@ -1,11 +1,9 @@
 import type { Scene } from '@babylonjs/core/scene';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { FresnelParameters } from '@babylonjs/core/Materials/fresnelParameters';
-import { CreateCapsule } from '@babylonjs/core/Meshes/Builders/capsuleBuilder';
 import { CreateCylinder } from '@babylonjs/core/Meshes/Builders/cylinderBuilder';
 import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
 import { CreateDisc } from '@babylonjs/core/Meshes/Builders/discBuilder';
@@ -19,17 +17,22 @@ const LEAN_PER_SLIP = 0.05;
 const LEAN_RATE = 10;
 /** Karts are drawn a touch larger than their physics radius so they read from the couch. */
 export const VISUAL_SCALE = 1.15;
-export const WHEEL_X = 0.86, WHEEL_Z = 0.78;
-const WHEEL_R = 0.34;
+/** Wheel centres (kart-local x, z), radius and width: chunky, octagonal, toy-like. */
+export const WHEEL_X = 0.95, WHEEL_Z = 0.8;
+const WHEEL_R = 0.36;
+const WHEEL_W = 0.44;
+/** The body: a flat-topped box this wide, tall and long, its underside at BODY_Y0. */
+const BODY_W = 1.6, BODY_H = 0.74, BODY_L = 2.4, BODY_Y0 = 0.26;
+const BODY_TOP = BODY_Y0 + BODY_H;
 /** Shield bubble: diameter (kart-local m), centre height, and how long before it runs out it blinks. */
 const BUBBLE_D = 3.2;
 const BUBBLE_Y = 0.85;
 const BUBBLE_BLINK = 1;
 /** Boost flame: cone length behind the kart's tail (an inner core is 60 % of it). */
 const FLAME_LEN = 1.7;
-const TAIL_Z = -1.25;
+const TAIL_Z = -BODY_L / 2 - 0.05;
 /** Slipstream: faint white streaks (kart-local x, y) that run from nose to tail while drafting. */
-const STREAKS: readonly (readonly [number, number])[] = [[-1.15, 0.45], [1.15, 0.45], [0, 1.95]];
+const STREAKS: readonly (readonly [number, number])[] = [[-1.4, 0.45], [1.4, 0.45], [0, 1.95]];
 const STREAK_LEN = 1.6;
 /** Draft (s) above which the streaks show, and how much more it takes to reach full strength. */
 const STREAK_FROM = 0.2;
@@ -56,6 +59,7 @@ interface View {
 interface Template {
   body: Mesh;
   nose: Mesh;
+  seat: Mesh;
   head: Mesh;
   wheel: Mesh;
   shadow: Mesh;
@@ -75,21 +79,21 @@ export class KartViews {
   private time = 0;
 
   constructor(private scene: Scene) {
-    const body = CreateCapsule(
-      'kartBody',
-      { orientation: new Vector3(0, 0, 1), height: 2.5, radius: 0.66, tessellation: 10, subdivisions: 1, capSubdivisions: 3 },
-      scene,
-    );
-    body.scaling.set(1.3, 0.85, 1);
-    body.position.y = 0.66;
+    // A blocky toy: flat-topped body box, square bumper and seat-back, round friendly head.
+    const body = CreateBox('kartBody', { width: BODY_W, height: BODY_H, depth: BODY_L }, scene);
+    body.position.y = BODY_Y0 + BODY_H / 2;
 
-    const nose = CreateSphere('kartNose', { diameter: 0.5, segments: 4 }, scene);
-    nose.position.set(0, 0.7, 1.2);
+    const nose = CreateBox('kartNose', { width: 0.9, height: 0.36, depth: 0.3 }, scene);
+    nose.position.set(0, BODY_Y0 + 0.24, BODY_L / 2 + 0.1);
+
+    // A low backrest, so the driver's head stays in sight from the camera behind.
+    const seat = CreateBox('kartSeat', { width: 0.86, height: 0.38, depth: 0.2 }, scene);
+    seat.position.set(0, BODY_TOP + 0.19, -0.88);
 
     const head = CreateSphere('kartHead', { diameter: 0.8, segments: 6 }, scene);
-    head.position.set(0, 1.42, -0.42);
+    head.position.set(0, BODY_TOP + 0.38, -0.42);
 
-    const wheel = CreateCylinder('kartWheel', { height: 0.38, diameter: WHEEL_R * 2, tessellation: 10 }, scene);
+    const wheel = CreateCylinder('kartWheel', { height: WHEEL_W, diameter: WHEEL_R * 2, tessellation: 8 }, scene);
     wheel.rotation.z = Math.PI / 2;
 
     const shadow = CreateDisc('kartShadow', { radius: 1.35, tessellation: 16 }, scene);
@@ -120,13 +124,14 @@ export class KartViews {
     const dark = matte('kartDark', '#5B4A44', scene);
     const cream = matte('kartCream', '#FFF3E0', scene);
     nose.material = dark;
+    seat.material = dark;
     head.material = cream;
     wheel.material = dark;
     const shadowMat = blobShadowMaterial(scene);
     shadow.material = shadowMat;
     for (const m of [dark, cream, shadowMat]) m.freeze();
 
-    this.template = { body, nose, head, wheel, shadow, bubble, flame, streak };
+    this.template = { body, nose, seat, head, wheel, shadow, bubble, flame, streak };
     for (const mesh of Object.values(this.template)) {
       mesh.isPickable = false;
       mesh.setEnabled(false);
@@ -159,6 +164,7 @@ export class KartViews {
     const body = part(t.body, tilt);
     body.material = this.bodyMaterial(k.color);
     part(t.nose, tilt);
+    part(t.seat, tilt);
     part(t.head, tilt);
     for (const [x, z] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
       part(t.wheel, root).position.set(x * WHEEL_X, WHEEL_R, z * WHEEL_Z);
