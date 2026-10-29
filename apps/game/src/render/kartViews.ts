@@ -22,6 +22,8 @@ interface View {
   root: TransformNode;
   tilt: TransformNode;
   lean: number;
+  /** Frame number of the last update that saw this kart. */
+  seen: number;
 }
 
 /** Shared template meshes; each kart gets clones that reuse the same geometry. */
@@ -38,6 +40,8 @@ export class KartViews {
   private views = new Map<number, View>();
   private template: Template;
   private bodyMats = new Map<string, StandardMaterial>();
+  private frame = 0;
+  private stale: number[] = [];
 
   constructor(private scene: Scene) {
     const body = CreateCapsule(
@@ -109,21 +113,21 @@ export class KartViews {
       part(t.wheel, root).position.set(x * WHEEL_X, WHEEL_R, z * WHEEL_Z);
     }
     part(t.shadow, root);
-    return { root, tilt, lean: 0 };
+    return { root, tilt, lean: 0, seen: this.frame };
   }
 
   /** Syncs every kart's position, heading and lean; drops views of karts that no longer exist. */
   update(karts: Kart[]): void {
     const dt = Math.min(0.1, this.scene.getEngine().getDeltaTime() / 1000);
     const blend = 1 - Math.exp(-LEAN_RATE * dt);
-    const alive = new Set<number>();
+    const frame = ++this.frame;
     for (const k of karts) {
-      alive.add(k.id);
       let v = this.views.get(k.id);
       if (!v) {
         v = this.create(k);
         this.views.set(k.id, v);
       }
+      v.seen = frame;
       v.root.position.set(k.pos.x, 0, k.pos.z);
       v.root.rotation.y = k.heading;
       // While turning, velocity lags the nose; that sideways slip rolls the body outwards.
@@ -132,9 +136,15 @@ export class KartViews {
       v.lean += (want - v.lean) * blend;
       v.tilt.rotation.z = v.lean;
     }
-    for (const [id, v] of this.views) {
-      if (!alive.has(id)) {
-        v.root.dispose();
+    // Only when some view has no kart any more (rare) do we walk the map; steady frames allocate nothing.
+    if (this.views.size > karts.length) {
+      const stale = this.stale;
+      stale.length = 0;
+      this.views.forEach((v, id) => {
+        if (v.seen !== frame) stale.push(id);
+      });
+      for (const id of stale) {
+        this.views.get(id)?.root.dispose();
         this.views.delete(id);
       }
     }

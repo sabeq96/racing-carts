@@ -14,7 +14,9 @@ export class Game {
   track: Track;
   karts: Kart[] = [];
   race = new Race();
-  private drivers: ((kartId: number) => Driver) | null = null;
+  /** Human kart ids as of the latest step; reused so the render loop allocates nothing. */
+  private humanIds: number[] = [];
+  private readonly isHuman = (id: number): boolean => this.humanIds.indexOf(id) >= 0;
 
   constructor(track: Track) {
     this.track = track;
@@ -30,20 +32,19 @@ export class Game {
 
   /** One fixed step: inputs → physics → kart collisions → race (progress, laps, phases). */
   step(dt: number, drivers: (kartId: number) => Driver): RaceEvent[] {
-    this.drivers = drivers;
     const racing = this.race.phase === 'racing';
+    this.humanIds.length = 0;
     for (const k of this.karts) {
-      const input = racing ? drivers(k.id).input() : NEUTRAL_INPUT;
-      stepKart(k, input, this.track, dt);
+      const driver = drivers(k.id);
+      if (driver.kind === 'human') this.humanIds.push(k.id);
+      stepKart(k, racing ? driver.input() : NEUTRAL_INPUT, this.track, dt);
     }
     resolveKartCollisions(this.karts);
-    return this.race.update(dt, this.karts, this.track, (id) => drivers(id).kind === 'human');
+    return this.race.update(dt, this.karts, this.track, this.isHuman);
   }
 
-  /** Ids of karts driven by humans, per the drivers passed to the latest `step`. */
-  humanKartIds(): number[] {
-    const drivers = this.drivers;
-    if (!drivers) return [];
-    return this.karts.filter((k) => drivers(k.id).kind === 'human').map((k) => k.id);
+  /** Ids of karts driven by humans, per the drivers passed to the latest `step` (a live, shared array). */
+  humanKartIds(): readonly number[] {
+    return this.humanIds;
   }
 }

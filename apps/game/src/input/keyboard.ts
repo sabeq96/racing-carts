@@ -19,6 +19,10 @@ function keyOf(e: KeyboardEvent): string {
     case 38: return 'ArrowUp';
     case 39: return 'ArrowRight';
     case 40: return 'ArrowDown';
+    case 65: return 'a';
+    case 68: return 'd';
+    case 83: return 's';
+    case 87: return 'w';
     default: return '';
   }
 }
@@ -48,8 +52,9 @@ export function createKeyboard(target: Window = window): { input(): InputSnapsho
       down.delete(key.toUpperCase());
     }
   });
-  // Keys released while the window is unfocused never send keyup.
+  // Keys released while the window is unfocused or hidden never send keyup.
   target.addEventListener('blur', () => down.clear());
+  target.document.addEventListener('visibilitychange', () => down.clear());
 
   return {
     input(): InputSnapshot {

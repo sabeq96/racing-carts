@@ -17,6 +17,22 @@ const STYLE = `
 
 type El = HTMLElement;
 
+export interface RaceRow {
+  name: string;
+  color: string;
+  lap: number;
+  item: string | null;
+}
+
+function sameRows(a: readonly RaceRow[], b: readonly RaceRow[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i];
+    if (x.name !== y.name || x.color !== y.color || x.lap !== y.lap || x.item !== y.item) return false;
+  }
+  return true;
+}
+
 function el(tag: string, css = '', text?: string, cls?: string): El {
   const node = document.createElement(tag);
   if (css) node.style.cssText = css;
@@ -43,7 +59,9 @@ export class Hud {
   private raceEl: El;
   private resultsEl: El;
   private messageEl: El;
-  private raceKey = '';
+  /** Rows last drawn by `race`, compared field by field so unchanged frames allocate nothing. */
+  private raceRows: RaceRow[] = [];
+  private raceDirty = true;
   private goTimer: number | undefined;
 
   constructor(private root: HTMLElement) {
@@ -59,17 +77,20 @@ export class Hud {
       root.appendChild(d);
       return d;
     };
-    this.lobbyEl = layer('inset:48px;gap:48px;');
+    // Explicit edges, not `inset`: that shorthand arrived in Chrome 87 and the TV is ~Chrome 85.
+    this.lobbyEl = layer('top:48px;right:48px;bottom:48px;left:48px;gap:48px;');
     this.raceEl = layer('left:40px;top:40px;width:470px;padding:22px 26px;flex-direction:column;gap:6px;');
     this.raceEl.className = 'rc-panel';
-    this.resultsEl = layer('inset:0;align-items:center;justify-content:center;');
+    this.resultsEl = layer('top:0;right:0;bottom:0;left:0;align-items:center;justify-content:center;');
     // Upper third, so the bubble never hides the karts the camera keeps centred.
     this.countdownEl = layer('left:0;right:0;top:110px;justify-content:center;');
     this.messageEl = layer('left:0;right:0;top:56px;justify-content:center;');
   }
 
+  /** Writes `display` only when it changes (`race` runs every frame). */
   private show(node: El, on: boolean): void {
-    node.style.display = on ? 'flex' : 'none';
+    const want = on ? 'flex' : 'none';
+    if (node.style.display !== want) node.style.display = want;
   }
 
   lobby(code: string, qrDataUrl: string, url: string, slots: { name: string; color: string; bot: boolean; host: boolean }[]): void {
@@ -131,13 +152,14 @@ export class Hud {
     if (go) this.goTimer = window.setTimeout(() => this.show(box, false), GO_HIDE_MS);
   }
 
-  race(rows: { name: string; color: string; lap: number; item: string | null }[]): void {
+  race(rows: readonly RaceRow[]): void {
     this.show(this.lobbyEl, false);
     this.show(this.resultsEl, false);
     this.show(this.raceEl, true);
-    const key = JSON.stringify(rows);
-    if (key === this.raceKey) return; // called every frame: only touch the DOM on change
-    this.raceKey = key;
+    // Called every frame: only touch the DOM when a row changed.
+    if (!this.raceDirty && sameRows(rows, this.raceRows)) return;
+    this.raceDirty = false;
+    this.raceRows = rows.map((r) => ({ name: r.name, color: r.color, lap: r.lap, item: r.item }));
     const box = this.raceEl;
     box.textContent = '';
     rows.forEach((r, i) => {
@@ -156,7 +178,7 @@ export class Hud {
   results(rows: { name: string; color: string }[], hostHint: string): void {
     this.show(this.lobbyEl, false);
     this.show(this.raceEl, false);
-    this.raceKey = '';
+    this.raceDirty = true;
     const box = this.resultsEl;
     box.textContent = '';
     const panel = el('div', 'width:820px;padding:40px 56px;display:flex;flex-direction:column;align-items:stretch;gap:10px;', undefined, 'rc-panel rc-pop');

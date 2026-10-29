@@ -6,11 +6,13 @@ import { FixedStepper } from './loop';
 import { createKeyboard } from './input/keyboard';
 import { buildTrack } from './track/track';
 import { TRACK_V1 } from './track/trackDef';
-import { lapOf, rankKarts } from './race/progress';
+import { compareRank, lapOf } from './race/progress';
+import type { Kart } from './kart/kart';
+import type { Vec2 } from './math/vec2';
 import { createScene } from './render/scene';
 import { KartViews } from './render/kartViews';
 import { CameraRig } from './render/camera';
-import { Hud } from './render/hud';
+import { Hud, type RaceRow } from './render/hud';
 
 const hudRoot = document.getElementById('hud');
 if (!hudRoot) throw new Error('missing #hud');
@@ -32,10 +34,12 @@ function runGame(root: HTMLElement): void {
     ? Math.max(0, Math.min(MAX_PLAYERS - humans, botsParam))
     : MAX_PLAYERS - humans;
   const slotCount = humans + bots;
+  // Antialiasing is on unless `?aa=0` (an escape hatch if the TV GPU struggles).
+  const antialias = params.get('aa') !== '0';
 
   let engine: Engine;
   try {
-    engine = new Engine(canvas, true, { stencil: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' }, false);
+    engine = new Engine(canvas, antialias, { stencil: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' }, false);
   } catch {
     hud.message("This screen can't draw 3D");
     return;
@@ -56,11 +60,25 @@ function runGame(root: HTMLElement): void {
   // Kart 0 is the keyboard; the rest idle until bots arrive in Task 10.
   const drivers = (id: number): Driver => (id === 0 && keyboardDriver) || botDrivers[id];
 
-  const rowsFor = () =>
-    rankKarts(game.karts).map((k) => {
-      const d = drivers(k.id);
-      return { name: d.name, color: k.color, lap: lapOf(k, track), item: k.item };
-    });
+  // Reused every frame so the render loop does not allocate.
+  const ranked: Kart[] = [];
+  const rows: RaceRow[] = [];
+  const framed: Vec2[] = [];
+  const rowsFor = (): RaceRow[] => {
+    ranked.length = 0;
+    for (const k of game.karts) ranked.push(k);
+    ranked.sort(compareRank);
+    rows.length = ranked.length;
+    for (let i = 0; i < ranked.length; i++) {
+      const k = ranked[i];
+      const row = rows[i] || (rows[i] = { name: '', color: '', lap: 1, item: null });
+      row.name = drivers(k.id).name;
+      row.color = k.color;
+      row.lap = lapOf(k, track);
+      row.item = k.item;
+    }
+    return rows;
+  };
 
   if (keyboard) {
     hud.message('Press Enter to start');
@@ -90,8 +108,9 @@ function runGame(root: HTMLElement): void {
 
     views.update(game.karts);
     const humanIds = game.humanKartIds();
-    const framed = humanIds.length > 0 ? game.karts.filter((k) => humanIds.indexOf(k.id) >= 0) : game.karts;
-    rig.update(framed.map((k) => k.pos), engine.getAspectRatio(rig.camera), Math.min(0.1, dt));
+    framed.length = 0;
+    for (const k of game.karts) if (humanIds.length === 0 || humanIds.indexOf(k.id) >= 0) framed.push(k.pos);
+    rig.update(framed, engine.getAspectRatio(rig.camera), Math.min(0.1, dt));
     scene.render();
   });
   window.addEventListener('resize', () => engine.resize());
