@@ -102,7 +102,7 @@ function slotCard(s: LobbySlot): El {
     ),
   );
   const tag = s.host ? 'Host' : !empty && s.bot ? 'Away' : '';
-  card.append(el('div', `height:34px;font-size:30px;font-weight:900;color:${s.host ? CORAL : SOFT};`, tag));
+  card.append(el('div', `height:44px;font-size:36px;line-height:44px;font-weight:900;color:${s.host ? CORAL : SOFT};`, tag));
   return card;
 }
 
@@ -153,7 +153,7 @@ export class Hud {
     };
     // Explicit edges, not `inset`: that shorthand arrived in Chrome 87 and the TV is ~Chrome 85.
     this.lobbyEl = layer('top:48px;right:48px;bottom:48px;left:48px;gap:48px;');
-    this.raceEl = layer('left:40px;top:40px;width:470px;padding:22px 26px;flex-direction:column;gap:6px;');
+    this.raceEl = layer('left:40px;top:40px;width:500px;padding:22px 26px;flex-direction:column;gap:6px;');
     this.raceEl.className = 'rc-panel';
     this.resultsEl = layer('top:0;right:0;bottom:0;left:0;align-items:center;justify-content:center;');
     // Upper third, so the bubble never hides the karts the camera keeps centred.
@@ -226,7 +226,7 @@ export class Hud {
     };
     const words = el('div', 'min-width:600px;display:flex;flex-direction:column;align-items:flex-start;');
     const code = el('div', 'font-size:170px;line-height:1;font-weight:900;letter-spacing:0.1em;margin:6px 0 18px;white-space:nowrap;');
-    const url = el('div', `font-size:32px;color:${SOFT};`);
+    const url = el('div', `font-size:36px;color:${SOFT};`);
     words.append(
       el('div', `font-size:52px;font-weight:900;color:${CORAL};`, 'Racing Carts'),
       el('div', `font-size:36px;color:${SOFT};margin-top:18px;`, 'Room code'),
@@ -281,14 +281,14 @@ export class Hud {
       row.append(
         el('div', `width:44px;font-size:40px;font-weight:900;text-align:right;color:${i === 0 ? CORAL : INK};`, String(i + 1)),
         dot(r.color, 44),
-        el('div', 'flex:1;min-width:0;font-size:34px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;', r.name),
+        el('div', 'flex:1;min-width:0;font-size:36px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;', r.name),
       );
       if (r.item) {
         row.append(
-          el('div', `font-size:34px;line-height:52px;width:52px;height:52px;text-align:center;border-radius:50%;background:#ffe9cf;flex:none;`, r.item),
+          el('div', `font-size:36px;line-height:52px;width:52px;height:52px;text-align:center;border-radius:50%;background:#ffe9cf;flex:none;`, r.item),
         );
       }
-      row.append(el('div', `font-size:28px;color:${SOFT};white-space:nowrap;`, `${Math.min(r.lap, TOTAL_LAPS)}/${TOTAL_LAPS}`));
+      row.append(el('div', `font-size:36px;color:${SOFT};white-space:nowrap;`, `${Math.min(r.lap, TOTAL_LAPS)}/${TOTAL_LAPS}`));
       box.append(row);
     });
   }
@@ -311,7 +311,7 @@ export class Hud {
       );
       panel.append(row);
     });
-    if (hostHint) panel.append(el('div', `font-size:34px;color:${MINT};text-align:center;margin-top:20px;`, hostHint));
+    if (hostHint) panel.append(el('div', `font-size:40px;color:${MINT};text-align:center;margin-top:20px;`, hostHint));
     box.append(panel);
     this.show(box, true);
   }
