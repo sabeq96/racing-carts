@@ -13,7 +13,8 @@ import {
   CameraRig,
   HIT_TRAUMA,
   MIN_RADIUS,
-  SHAKE_AMPLITUDE,
+  MAX_TRAUMA,
+  SHAKE_PER_RADIUS,
   decayTrauma,
   fitCamera,
   shakeOffset,
@@ -131,36 +132,52 @@ test('fitCamera: framed karts always project inside NDC [-0.9, 0.9] at 16:9', ()
   expect(filled).toBeGreaterThan(50);
 });
 
-test('shake: a hit adds 0.5 trauma that fades out over 0.4 s', () => {
+test('shake: a hit adds 0.5 trauma that fades out over 0.4 s; trauma is capped at 0.75', () => {
   expect(HIT_TRAUMA).toBe(0.5);
+  expect(MAX_TRAUMA).toBe(0.75);
   let t = HIT_TRAUMA;
   for (let i = 0; i < 12; i++) t = decayTrauma(t, 1 / 60);
   expect(t).toBeGreaterThan(0.2);
   for (let i = 0; i < 12; i++) t = decayTrauma(t, 1 / 60);
   expect(t).toBeLessThan(1e-9);
   expect(decayTrauma(0, 1)).toBe(0);
+  const rig = new CameraRig(scene, b);
+  rig.addTrauma(HIT_TRAUMA);
+  rig.addTrauma(HIT_TRAUMA);
+  rig.addTrauma(HIT_TRAUMA);
+  expect(rig.trauma).toBe(0.75);
 });
 
-test('shake: offset is trauma² × 0.6 m of smooth noise, and none without trauma', () => {
-  expect(SHAKE_AMPLITUDE).toBe(0.6);
+test('shake: offset is trauma² × 0.05 × camera radius of quick smooth noise, and none without trauma', () => {
+  expect(SHAKE_PER_RADIUS).toBe(0.05);
   const out = { x: 0, z: 0 };
-  shakeOffset(0, 1.23, out);
+  shakeOffset(0, 1.23, 80, out);
   expect(out).toEqual({ x: 0, z: 0 });
-  let biggest = 0;
-  let prev = { x: 0, z: 0 };
-  let jump = 0;
-  for (let i = 0; i < 600; i++) {
-    shakeOffset(0.5, i / 60, out);
-    biggest = Math.max(biggest, Math.hypot(out.x, out.z));
-    if (i > 0) jump = Math.max(jump, Math.hypot(out.x - prev.x, out.z - prev.z));
-    prev = { x: out.x, z: out.z };
+  for (const radius of [MIN_RADIUS, maxRadius]) {
+    const a = 0.25 * 0.05 * radius;
+    let biggest = 0;
+    let prev = { x: 0, z: 0 };
+    let jump = 0;
+    let crossings = 0;
+    for (let i = 0; i < 600; i++) {
+      shakeOffset(0.5, i / 60, radius, out);
+      biggest = Math.max(biggest, Math.hypot(out.x, out.z));
+      if (i > 0) {
+        jump = Math.max(jump, Math.hypot(out.x - prev.x, out.z - prev.z));
+        if (Math.sign(out.x) !== Math.sign(prev.x)) crossings++;
+      }
+      prev = { x: out.x, z: out.z };
+    }
+    expect(biggest).toBeLessThanOrEqual(a * Math.SQRT2 + 1e-9);
+    expect(biggest).toBeGreaterThan(a * 0.5);
+    expect(jump).toBeLessThan(a); // smooth: never a full-amplitude jump between frames
+    // Quick (30-40 rad/s, about 5-6 Hz): 10 s of noise crosses zero roughly 100 times.
+    expect(crossings).toBeGreaterThan(70);
+    expect(crossings).toBeLessThan(140);
   }
-  expect(biggest).toBeLessThanOrEqual(0.25 * 0.6 * Math.SQRT2 + 1e-9);
-  expect(biggest).toBeGreaterThan(0.25 * 0.6 * 0.5);
-  expect(jump).toBeLessThan(0.05); // smooth: small moves frame to frame
 });
 
-test('CameraRig: a hit shakes the view briefly, then it settles exactly where it would have been', () => {
+test('CameraRig: a hit shakes the view by about 2% of the radius, then it settles exactly where it would have been', () => {
   const calm = new CameraRig(scene, b);
   const shaken = new CameraRig(scene, b);
   const pts = [{ x: 10, z: 20 }];
@@ -173,7 +190,8 @@ test('CameraRig: a hit shakes the view briefly, then it settles exactly where it
     shaken.update(pts, aspect, 1 / 60);
     moved = Math.max(moved, Vector3.Distance(calm.camera.target, shaken.camera.target));
   }
-  expect(moved).toBeGreaterThan(0.01);
-  expect(moved).toBeLessThan(0.25);
+  const a = 0.25 * 0.05 * MIN_RADIUS; // one hit at the closest zoom: ~0.44 m
+  expect(moved).toBeGreaterThan(a * 0.3);
+  expect(moved).toBeLessThanOrEqual(a * Math.SQRT2 + 1e-9);
   expect(Vector3.Distance(calm.camera.target, shaken.camera.target)).toBeLessThan(1e-9);
 });
