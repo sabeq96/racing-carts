@@ -1,4 +1,4 @@
-import type { Kart } from '../kart/kart';
+import { refreshEffect, type Kart } from '../kart/kart';
 import { KART_RADIUS, SPIN_TIME } from '../kart/tuning';
 import { compareRank } from '../race/progress';
 import type { Track } from '../track/track';
@@ -44,13 +44,7 @@ export function createWorld(karts: Kart[], track: Track): World {
     },
 
     applyEffect(k, kind, seconds) {
-      for (const e of k.effects) {
-        if (e.kind === kind) {
-          e.remaining = seconds; // using it again restarts the timer, it does not stack
-          return;
-        }
-      }
-      k.effects.push({ kind, remaining: seconds });
+      refreshEffect(k, kind, seconds); // using it again restarts the timer, it does not stack
     },
 
     hasEffect(k, kind) {

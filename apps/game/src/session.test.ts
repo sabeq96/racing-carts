@@ -295,6 +295,7 @@ test('syncPhones sends state only when changed', () => {
     item: null,
     itemIcon: null,
     rolling: false,
+    drift: 0,
   });
   session.syncPhones();
   session.syncPhones();
@@ -571,6 +572,26 @@ test('racing state carries the held item, its icon and the rolling flag', () => 
   game.karts[0].item = 'boost';
   session.syncPhones();
   expect(lastState('a')).toMatchObject({ item: 'boost', itemIcon: '⚡', rolling: false });
+});
+
+test('racing state carries the kart\'s drift charge level (0 in the lobby)', () => {
+  const { game, session } = setup(1);
+  session.onHello('a', 'Ada');
+  session.syncPhones();
+  expect(lastState('a')).toMatchObject({ phase: 'lobby', drift: 0 });
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  session.syncPhones();
+  expect(lastState('a')).toMatchObject({ drift: 0 });
+  game.karts[0].drift = { active: true, charge: 0.7 };
+  session.syncPhones();
+  expect(lastState('a')).toMatchObject({ drift: 1 });
+  game.karts[0].drift = { active: true, charge: 1.4 };
+  session.syncPhones();
+  expect(lastState('a')).toMatchObject({ drift: 2 });
+  game.karts[0].drift = { active: false, charge: 0 };
+  session.syncPhones();
+  expect(lastState('a')).toMatchObject({ drift: 0 });
 });
 
 test('hits and finished rolls reach the phone driving that kart', () => {

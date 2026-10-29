@@ -344,6 +344,22 @@ body[data-screen="drive"] #drive {
   box-shadow: 0 1px 0 #e0645a;
   transform: translateY(6px);
 }
+/* Drift charge: warm yellow at level 1, pink-orange at level 2 (let go of BRAKE for a little boost). */
+.pad-brake.glow1,
+.pad-brake.glow2 {
+  transition: background-color 0.15s;
+}
+.pad-brake.glow1 {
+  background: #ffe38a;
+  color: var(--butter-ink);
+  box-shadow: 0 1px 0 #e6b92e, 0 0 0 6px rgba(255, 227, 138, 0.55), 0 0 30px 10px rgba(255, 217, 102, 0.75);
+}
+.pad-brake.glow2 {
+  background: #ffa98f;
+  color: var(--coral-ink);
+  box-shadow: 0 1px 0 #f07a6a, 0 0 0 6px rgba(255, 169, 143, 0.6), 0 0 34px 12px rgba(255, 138, 170, 0.8);
+  animation: glow 0.45s ease-in-out infinite alternate;
+}
 .steer-btns {
   flex: 1 1 auto;
   min-height: 0;
@@ -525,6 +541,11 @@ body[data-screen="drive"] #drive {
   to {
     transform: translate(-50%, -50%) scale(1);
     opacity: 1;
+  }
+}
+@keyframes glow {
+  to {
+    filter: brightness(1.08) saturate(1.15);
   }
 }
 @keyframes wiggle {

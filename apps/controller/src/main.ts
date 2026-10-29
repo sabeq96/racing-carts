@@ -189,6 +189,11 @@ function render(): void {
     els.itemPad.classList.toggle('rolling', s.rolling);
     els.itemPad.classList.toggle('empty', empty);
 
+    // Drift charge: the BRAKE button glows while a mini-turbo is ready to fire.
+    const drift = s.phase === 'racing' ? s.drift : 0;
+    els.brakePad.classList.toggle('glow1', drift === 1);
+    els.brakePad.classList.toggle('glow2', drift === 2);
+
     els.results.hidden = !inResults;
     if (inResults) {
       els.resultText.textContent =
@@ -199,6 +204,7 @@ function render(): void {
   } else {
     els.results.hidden = true;
     els.finishBanner.hidden = true;
+    els.brakePad.classList.remove('glow1', 'glow2');
   }
 
   els.steerBtns.hidden = !buttonSteer;
@@ -528,7 +534,10 @@ els.codeInput.addEventListener('input', () => {
   els.codeInput.value = els.codeInput.value.toUpperCase().replace(/[^A-Z]/g, '');
 });
 
-/** Dev-only preview: ?demo=1 (driving), ?demo=lobby, ?demo=results, ?demo=finish; &slot=0..5 picks the kart colour. */
+/**
+ * Dev-only preview: ?demo=1 (driving), ?demo=lobby, ?demo=results, ?demo=finish; &slot=0..5 picks the kart colour;
+ * &drift=1|2 shows a held BRAKE glowing with that drift charge.
+ */
 function runDemo(kind: string): void {
   const slot = Number(params.get('slot') ?? 2) % KART_COLORS.length;
   setKartColor(KART_COLORS[slot]);
@@ -547,8 +556,10 @@ function runDemo(kind: string): void {
     item: kind === 'results' ? null : 'rocket',
     itemIcon: kind === 'results' ? null : '🚀',
     rolling: params.get('rolling') === '1',
+    drift: params.get('drift') === '2' ? 2 : params.get('drift') === '1' ? 1 : 0,
   };
   finished = kind === 'finish';
+  if (lastState.drift > 0) els.brakePad.classList.add('pressed');
   render();
   demoSteer = 0.45;
   showMeter(demoSteer);

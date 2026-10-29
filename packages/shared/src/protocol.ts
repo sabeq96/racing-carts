@@ -42,6 +42,8 @@ export type ServerMsg =
       item: string | null;
       itemIcon: string | null;
       rolling: boolean;
+      /** Drift mini-turbo charge of this phone's kart: 0 none, 1 and 2 make the BRAKE button glow. */
+      drift: 0 | 1 | 2;
     }
   | { t: 'event'; kind: 'hit' | 'itemGot' | 'finish' }
   | { t: 'lobbyFull' };
@@ -123,6 +125,7 @@ export function decodeServer(raw: unknown): ServerMsg | null {
         item: m.item as string | null,
         itemIcon: m.itemIcon as string | null,
         rolling: m.rolling as boolean,
+        drift: m.drift === 1 || m.drift === 2 ? m.drift : 0,
       };
     case 'event':
       return { t: 'event', kind: m.kind as 'hit' | 'itemGot' | 'finish' };

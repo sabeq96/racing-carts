@@ -9,6 +9,7 @@ import {
 } from '@rc/shared';
 import { botInput, createBotBrain, type BotBrain } from './bots/bot';
 import type { Driver, Game } from './game';
+import { driftLevel } from './kart/kart';
 import type { PlayerRegistry } from './net/players';
 import { getPowerup } from './powerups/registry';
 import { lapOf, rankKarts } from './race/progress';
@@ -197,6 +198,7 @@ export class Session {
         item: kart ? kart.item : null,
         itemIcon: kart && kart.item !== null ? getPowerup(kart.item)?.icon ?? null : null,
         rolling: kart ? kart.rolling !== null : false,
+        drift: kart ? driftLevel(kart) : 0,
       };
       const json = JSON.stringify(msg);
       const last = this.lastSent.get(p.token);

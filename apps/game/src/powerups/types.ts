@@ -55,7 +55,7 @@ export interface WorldApi {
   time: number;
   entities: PowerupEntity[];
   spawnEntity(e: PowerupEntity): void;
-  /** Starts (or restarts) a timed effect; the kart physics reads `boost`, hits read `shield`. */
+  /** Starts (or restarts, never stacking or shortening) a timed effect; the kart physics reads `boost`, hits read `shield`. */
   applyEffect(k: Kart, kind: string, seconds: number): void;
   hasEffect(k: Kart, kind: string): boolean;
   removeEffect(k: Kart, kind: string): void;

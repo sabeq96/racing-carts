@@ -6,9 +6,20 @@ import {
   BOOST_FACTOR,
   BRAKE_DECEL,
   COAST_DECEL,
+  DRIFT_DRAG,
+  DRIFT_END_SPEED,
+  DRIFT_END_STEER,
+  DRIFT_GRIP,
+  DRIFT_START_SPEED,
+  DRIFT_START_STEER,
+  DRIFT_STEER,
   GRIP,
   KART_RADIUS,
   MAX_SPEED,
+  MT1,
+  MT1_BOOST,
+  MT2,
+  MT2_BOOST,
   REVERSE_MAX,
   STEER_RATE,
   WALL_RESTITUTION,
@@ -38,6 +49,8 @@ export interface Kart {
   distance: number;
   trackIndex: number;
   finishedAt: number | null;
+  /** Power slide: BRAKE + steer at speed. `charge` is seconds drifted (pays a mini-turbo on release). */
+  drift: { active: boolean; charge: number };
 }
 
 export function createKart(id: number, color: string, slot: Track['grid'][number], track: Track): Kart {
@@ -56,6 +69,7 @@ export function createKart(id: number, color: string, slot: Track['grid'][number
     distance: slot.s,
     trackIndex: track.project(slot.pos).index,
     finishedAt: null,
+    drift: { active: false, charge: 0 },
   };
 }
 
@@ -65,20 +79,65 @@ export function effectLeft(k: Kart, kind: string): number {
   return 0;
 }
 
+/**
+ * Starts the kart's `kind` effect, or restarts it without stacking: the timer becomes `seconds`, unless
+ * more is left already (a pad never cuts an item boost short). Shared by the powerup world and the karts.
+ */
+export function refreshEffect(k: Kart, kind: string, seconds: number): void {
+  for (const e of k.effects) {
+    if (e.kind === kind) {
+      e.remaining = Math.max(e.remaining, seconds);
+      return;
+    }
+  }
+  k.effects.push({ kind, remaining: seconds });
+}
+
+/** How charged the kart's drift is, for the sparks and the phone: 0 (or not drifting), 1 from MT1, 2 from MT2. */
+export function driftLevel(k: Kart): 0 | 1 | 2 {
+  if (!k.drift.active) return 0;
+  return k.drift.charge >= MT2 ? 2 : k.drift.charge >= MT1 ? 1 : 0;
+}
+
+/** Ends a drift: a charged one pays its mini-turbo as a boost (unless `cancel`), and the charge is gone. */
+function endDrift(k: Kart, cancel: boolean): void {
+  const d = k.drift;
+  if (!cancel) {
+    const level = driftLevel(k);
+    if (level > 0) refreshEffect(k, 'boost', level === 2 ? MT2_BOOST : MT1_BOOST);
+  }
+  d.active = false;
+  d.charge = 0;
+}
+
 /** Move `v` toward `target` by at most `step` (never overshooting). */
 function approach(v: number, target: number, step: number): number {
   return v < target ? Math.min(target, v + step) : Math.max(target, v - step);
 }
 
 export function stepKart(k: Kart, input: InputSnapshot, track: Track, dt: number): { hitWall: boolean } {
+  const drift = k.drift;
   if (k.spin > 0) {
+    if (drift.active) endDrift(k, true); // a spin-out loses the drift and its charge
     k.spin = Math.max(0, k.spin - dt);
     k.speed *= Math.exp(-3 * dt);
     k.heading += 10 * dt;
   } else {
+    const steer = Math.max(-1, Math.min(1, input.steer));
+    const turn = Math.abs(steer);
+    if (drift.active) {
+      if (!input.brake || turn <= DRIFT_END_STEER || k.speed < DRIFT_END_SPEED) endDrift(k, false);
+    } else if (input.brake && turn > DRIFT_START_STEER && k.speed > DRIFT_START_SPEED) {
+      drift.active = true;
+      drift.charge = 0;
+    }
     const boost = effectLeft(k, 'boost') > 0;
     const max = MAX_SPEED * (boost ? BOOST_FACTOR : 1);
-    if (input.brake) {
+    if (drift.active) {
+      // A drift holds its speed: brake only means "slide", with a mild drag (or the usual ease-off above max).
+      k.speed = k.speed > max ? Math.max(max, k.speed - ACCEL * dt) : k.speed - DRIFT_DRAG * dt;
+      drift.charge += dt;
+    } else if (input.brake) {
       // Brake wins over gas, also above top speed. Hard braking while rolling forward, gentler reverse from rest.
       k.speed = Math.max(-REVERSE_MAX, k.speed - (k.speed > 0 ? BRAKE_DECEL : ACCEL) * dt);
     } else if (k.speed > max) {
@@ -88,13 +147,13 @@ export function stepKart(k: Kart, input: InputSnapshot, track: Track, dt: number
     } else {
       k.speed = approach(k.speed, 0, COAST_DECEL * dt);
     }
-    const steer = Math.max(-1, Math.min(1, input.steer));
-    k.heading += steer * STEER_RATE * Math.min(1, Math.abs(k.speed) / 6) * Math.sign(k.speed) * dt;
+    const rate = STEER_RATE * (drift.active ? DRIFT_STEER : 1);
+    k.heading += steer * rate * Math.min(1, Math.abs(k.speed) / 6) * Math.sign(k.speed) * dt;
   }
 
-  // Grip: velocity chases the heading direction.
+  // Grip: velocity chases the heading direction (loosely while drifting, so the kart slides).
   const fx = Math.sin(k.heading), fz = Math.cos(k.heading);
-  const g = Math.min(1, GRIP * dt);
+  const g = Math.min(1, (drift.active ? DRIFT_GRIP : GRIP) * dt);
   k.vel.x += (fx * k.speed - k.vel.x) * g;
   k.vel.z += (fz * k.speed - k.vel.z) * g;
   k.pos.x += k.vel.x * dt;
@@ -126,7 +185,9 @@ export function stepKart(k: Kart, input: InputSnapshot, track: Track, dt: number
   // Scraping along a wall drags every step it lasts, so the walls are no guide rail.
   k.speed *= 1 - WALL_SCRAPE * dt;
   k.heading -= side * Math.min(0.3, f * 0.5);
-  return { hitWall: vIn > 0.5 };
+  const hitWall = vIn > 0.5;
+  if (hitWall && drift.active) endDrift(k, true); // bumping a wall loses the drift and its charge
+  return { hitWall };
 }
 
 /** Separates overlapping karts and exchanges half their approach velocity. Returns ids of bumped pairs. */

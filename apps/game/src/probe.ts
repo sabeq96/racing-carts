@@ -97,6 +97,7 @@ export function runProbe(hud: HTMLElement): void {
     item: null,
     itemIcon: null,
     rolling: false,
+    drift: 0,
   });
 
   const broadcast = (): void => {

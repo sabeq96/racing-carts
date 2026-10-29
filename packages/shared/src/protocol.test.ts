@@ -28,7 +28,14 @@ test('decodeClient rejects garbage', () => {
     expect(decodeClient(bad)).toBeNull();
 });
 test('decodeServer round-trips a state message', () => {
-  const s = { t: 'state', phase: 'racing', isHost: true, position: 2, racers: 6, lap: 1, totalLaps: 3, item: null, itemIcon: null, rolling: false };
+  const s = { t: 'state', phase: 'racing', isHost: true, position: 2, racers: 6, lap: 1, totalLaps: 3, item: null, itemIcon: null, rolling: false, drift: 2 };
   expect(decodeServer(JSON.stringify(s))).toEqual(s);
   expect(decodeServer({ t: 'bogus' })).toBeNull();
+});
+test('decodeServer reads the drift level as 0, 1 or 2 (an older TV without it reads 0)', () => {
+  const base = { t: 'state', phase: 'racing', isHost: false, position: 1, racers: 2, lap: 1, totalLaps: 3, item: null, itemIcon: null, rolling: false };
+  expect(decodeServer({ ...base, drift: 1 })).toMatchObject({ drift: 1 });
+  expect(decodeServer(base)).toMatchObject({ drift: 0 });
+  expect(decodeServer({ ...base, drift: 7 })).toMatchObject({ drift: 0 });
+  expect(decodeServer({ ...base, drift: '2' })).toMatchObject({ drift: 0 });
 });
