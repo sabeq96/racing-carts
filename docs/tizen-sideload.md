@@ -73,11 +73,15 @@ Then open `chrome://inspect` (or `http://localhost:9222`) in desktop Chrome and 
 - **Black screen on launch:** connect DevTools as in step 7 and check the console for errors (the game ships as a single classic script, so a script load error or a JavaScript syntax error is the usual cause).
 - **No sound on the TV:** the game tries to start its audio at launch, and again on every phase change and whenever a phone joins, but a TV can keep audio locked until a button is pressed. Press any key on the TV remote once. Also check the TV volume and sound output (not muted, the right speakers selected, no Bluetooth device taking the sound). Note that the audio files are **silent placeholders** until you replace them with real recordings (see `docs/audio-assets.md`), so a working game with no sound is expected until then.
 
-## First test: connectivity probe
+## First couch test
 
-Until the real game lands, the app starts in a **connectivity probe**. It exists to prove that phones can reach the TV over WebRTC (PeerJS) before anything else is built. It is the same screen as opening `index.html?probe=1`.
+Start the app on the TV and follow "First couch test" in the [README](../README.md): phones scan the QR code, the host taps **Start race**, and you play one full race plus a rematch.
 
-1. Complete steps 1 to 6 above and start the app on the TV.
+## Connectivity probe (if phones cannot connect)
+
+The app starts the game. The **connectivity probe** from the first build is still there for debugging: it only proves that phones can reach the host over WebRTC (PeerJS). Open the game with `?probe=1` in a browser (for example `npm run dev -w game`, then add `?probe=1` to the URL).
+
+1. Open the probe page.
 2. The TV shows a big 4-letter **room code**, a **QR code** and the controller address. If it shows "No internet — can't create room", the TV cannot reach the PeerJS broker (`0.peerjs.com`); check the TV's network and that it retries every 5 seconds.
 3. Scan the QR code with **two phones** (any browser; they do not need to be on the TV's Wi-Fi network, but being on it helps).
 4. Each phone enters a name and taps **Tap to start**. A coloured dot per phone appears on the TV and the TV text says "2 players connected".
