@@ -54,13 +54,59 @@ export interface RaceRow {
   lap: number;
   /** Icon of the held item (🎲 while rolling), or null. */
   item: string | null;
+  /** Crossed the line after the last lap: shown with a 🏁 instead of the lap counter. */
+  finished: boolean;
 }
+
+/** How the room code shows outside the lobby: a join card (results, countdown), a corner chip (racing) or not at all. */
+export type JoinMode = 'card' | 'chip' | 'none';
+
+interface JoinUi {
+  card: El;
+  qr: HTMLImageElement;
+  qrSpot: El;
+  code: El;
+  url1: El;
+  url2: El;
+  chip: El;
+  chipCode: El;
+}
+
+/** Shows `qr` at its own pixel size once loaded, hiding the placeholder; until then the placeholder stays. */
+function setQr(qr: HTMLImageElement, spot: El, dataUrl: string): void {
+  if ((qr.getAttribute('src') || '') === dataUrl) return;
+  qr.style.display = 'none';
+  spot.style.display = 'block';
+  if (dataUrl) qr.src = dataUrl;
+  else qr.removeAttribute('src');
+}
+
+function qrImage(placeholderPx: number, radius: number): { qr: HTMLImageElement; spot: El } {
+  const qr = document.createElement('img');
+  qr.alt = 'QR code to join';
+  // Shown at its own pixel size on the stage (exactly native when the stage scale is 1, i.e. a
+  // 1920×1080 viewport); `pixelated` keeps the modules crisp otherwise.
+  qr.style.cssText = `display:none;image-rendering:pixelated;border-radius:${radius}px;background:#fff;flex:none;`;
+  const spot = el('div', `width:${placeholderPx}px;height:${placeholderPx}px;border-radius:${radius}px;background:${RIM};flex:none;`);
+  qr.onload = () => {
+    qr.style.width = `${qr.naturalWidth}px`;
+    qr.style.height = `${qr.naturalHeight}px`;
+    qr.style.display = 'block';
+    spot.style.display = 'none';
+  };
+  return { qr, spot };
+}
+
+/** The short controller address without scheme or trailing slash, e.g. `sabeq96.github.io/racing-carts`. */
+const shortUrl = (url: string): string => url.replace(/^https?:\/\//, '').replace(/\/$/, '');
 
 function sameRows(a: readonly RaceRow[], b: readonly RaceRow[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     const x = a[i], y = b[i];
-    if (x.name !== y.name || x.color !== y.color || x.lap !== y.lap || x.item !== y.item) return false;
+    if (x.name !== y.name || x.color !== y.color || x.lap !== y.lap || x.item !== y.item || x.finished !== y.finished) {
+      return false;
+    }
   }
   return true;
 }
@@ -118,6 +164,9 @@ export class Hud {
   private raceEl: El;
   private resultsEl: El;
   private messageEl: El;
+  private joinEl: El;
+  private joinUi: JoinUi | null = null;
+  private joinKey = '';
   /** Rows last drawn by `race`, compared field by field so unchanged frames allocate nothing. */
   private raceRows: RaceRow[] = [];
   private raceDirty = true;
@@ -159,6 +208,8 @@ export class Hud {
     // Upper third, so the bubble never hides the karts the camera keeps centred.
     this.countdownEl = layer('left:0;right:0;top:110px;justify-content:center;');
     this.messageEl = layer(`left:0;right:0;top:${MESSAGE_TOP};justify-content:center;`);
+    // Bottom-right corner, clear of the race list (top left), the countdown bubble and the results panel.
+    this.joinEl = layer('right:48px;bottom:48px;flex-direction:column;align-items:flex-end;');
   }
 
   private placeMessage(top: string): void {
@@ -190,14 +241,8 @@ export class Hud {
 
     ui.code.textContent = code || '····';
     ui.code.style.color = code ? INK : RIM;
-    ui.url.textContent = url.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    if ((ui.qr.getAttribute('src') || '') !== qrDataUrl) {
-      // The placeholder stays until the new image has loaded (see onload).
-      ui.qr.style.display = 'none';
-      ui.qrSpot.style.display = 'block';
-      if (qrDataUrl) ui.qr.src = qrDataUrl;
-      else ui.qr.removeAttribute('src');
-    }
+    ui.url.textContent = shortUrl(url);
+    setQr(ui.qr, ui.qrSpot, qrDataUrl);
     ui.hint.textContent = hint;
     ui.hint.style.display = hint ? 'block' : 'none';
 
@@ -212,18 +257,7 @@ export class Hud {
 
     const top = el('div', 'display:flex;align-items:flex-start;justify-content:space-between;gap:40px;');
     const card = el('div', 'flex:none;display:flex;align-items:center;gap:48px;padding:36px 56px 36px 36px;', undefined, 'rc-panel');
-    const qr = document.createElement('img');
-    qr.alt = 'QR code to join';
-    // Shown at its own pixel size on the stage (exactly native when the stage scale is 1, i.e. a
-    // 1920×1080 viewport); `pixelated` keeps the modules crisp otherwise.
-    qr.style.cssText = 'display:none;image-rendering:pixelated;border-radius:20px;background:#fff;flex:none;';
-    const qrSpot = el('div', `width:320px;height:320px;border-radius:20px;background:${RIM};flex:none;`);
-    qr.onload = () => {
-      qr.style.width = `${qr.naturalWidth}px`;
-      qr.style.height = `${qr.naturalHeight}px`;
-      qr.style.display = 'block';
-      qrSpot.style.display = 'none';
-    };
+    const { qr, spot: qrSpot } = qrImage(320, 20);
     const words = el('div', 'min-width:600px;display:flex;flex-direction:column;align-items:flex-start;');
     const code = el('div', 'font-size:170px;line-height:1;font-weight:900;letter-spacing:0.1em;margin:6px 0 18px;white-space:nowrap;');
     const url = el('div', `font-size:36px;color:${SOFT};`);
@@ -245,6 +279,52 @@ export class Hud {
     const slots = el('div', 'display:flex;gap:28px;');
     box.append(top, slots);
     return { code, qr, qrSpot, url, hint, slots };
+  }
+
+  /**
+   * Lets friends join after the lobby. `card`: room code, QR (its own pixel size) and short URL, for the
+   * results and the countdown; `chip`: just the code in a small corner pill while racing. Hidden until the
+   * room is open. Cheap to call often: only touches the DOM when something changed.
+   */
+  join(code: string, qrDataUrl: string, url: string, mode: JoinMode): void {
+    const on = mode !== 'none' && code !== '';
+    this.show(this.joinEl, on);
+    if (!on) return;
+    const key = mode + '|' + code + '|' + url + '|' + qrDataUrl;
+    if (key === this.joinKey) return;
+    this.joinKey = key;
+    const ui = this.joinUi || (this.joinUi = this.buildJoin());
+    const card = mode === 'card';
+    ui.card.style.display = card ? 'flex' : 'none';
+    ui.chip.style.display = card ? 'none' : 'flex';
+    ui.code.textContent = code;
+    ui.chipCode.textContent = code;
+    // Two short lines read better from the couch than one long one: host, then path.
+    const short = shortUrl(url);
+    const cut = short.indexOf('/');
+    ui.url1.textContent = cut > 0 ? short.slice(0, cut) : short;
+    ui.url2.textContent = cut > 0 ? short.slice(cut) : '';
+    setQr(ui.qr, ui.qrSpot, qrDataUrl);
+  }
+
+  private buildJoin(): JoinUi {
+    const card = el('div', 'flex-direction:column;align-items:center;padding:28px 32px 24px;', undefined, 'rc-panel');
+    const { qr, spot: qrSpot } = qrImage(240, 16);
+    const code = el('div', 'font-size:84px;line-height:1;font-weight:900;letter-spacing:0.1em;padding-left:0.1em;margin:18px 0 10px;');
+    const url1 = el('div', `font-size:36px;line-height:1.15;color:${SOFT};`);
+    const url2 = el('div', `font-size:36px;line-height:1.15;color:${SOFT};`);
+    card.append(el('div', `font-size:40px;font-weight:900;color:${CORAL};margin-bottom:14px;`, 'Join in!'), qr, qrSpot, code, url1, url2);
+
+    // A quiet pill: readable from the couch, but no panel that competes with the race.
+    const chip = el(
+      'div',
+      `align-items:baseline;gap:14px;padding:12px 30px;border-radius:40px;background:rgba(255,250,242,.82);` +
+        `box-shadow:0 6px 0 rgba(240,220,196,.82);font-size:36px;color:${SOFT};`,
+    );
+    const chipCode = el('span', `font-size:44px;font-weight:900;letter-spacing:0.1em;color:${INK};`);
+    chip.append(el('span', '', 'Join'), chipCode);
+    this.joinEl.append(card, chip);
+    return { card, qr, qrSpot, code, url1, url2, chip, chipCode };
   }
 
   countdown(n: number | 'GO'): void {
@@ -273,7 +353,7 @@ export class Hud {
     // Called every frame: only touch the DOM when a row changed.
     if (!this.raceDirty && sameRows(rows, this.raceRows)) return;
     this.raceDirty = false;
-    this.raceRows = rows.map((r) => ({ name: r.name, color: r.color, lap: r.lap, item: r.item }));
+    this.raceRows = rows.map((r) => ({ name: r.name, color: r.color, lap: r.lap, item: r.item, finished: r.finished }));
     const box = this.raceEl;
     box.textContent = '';
     rows.forEach((r, i) => {
@@ -288,7 +368,11 @@ export class Hud {
           el('div', `font-size:36px;line-height:52px;width:52px;height:52px;text-align:center;border-radius:50%;background:#ffe9cf;flex:none;`, r.item),
         );
       }
-      row.append(el('div', `font-size:36px;color:${SOFT};white-space:nowrap;`, `${Math.min(r.lap, TOTAL_LAPS)}/${TOTAL_LAPS}`));
+      row.append(
+        r.finished
+          ? el('div', 'font-size:36px;white-space:nowrap;', '🏁')
+          : el('div', `font-size:36px;color:${SOFT};white-space:nowrap;`, `${Math.min(r.lap, TOTAL_LAPS)}/${TOTAL_LAPS}`),
+      );
       box.append(row);
     });
   }

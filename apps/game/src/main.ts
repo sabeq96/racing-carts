@@ -15,7 +15,7 @@ import { KartViews } from './render/kartViews';
 import { EntityViews } from './render/entityViews';
 import { getPowerup } from './powerups/registry';
 import { CameraRig } from './render/camera';
-import { Hud, type RaceRow } from './render/hud';
+import { Hud, type JoinMode, type RaceRow } from './render/hud';
 import { startHost, type NetHost } from './net/host';
 import { PlayerRegistry } from './net/players';
 import { KEYBOARD_TOKEN, Session } from './session';
@@ -31,8 +31,9 @@ const params = new URLSearchParams(location.search);
 const SYNC_MS = 100;
 /** Wait before trying to open the room again after a failure. */
 const ROOM_RETRY_MS = 5000;
-/** QR image width in px; the library rounds down to whole pixels per module. */
+/** QR image widths in px (lobby, and the compact join card after the lobby); the library rounds down to whole pixels per module. */
 const QR_WIDTH = 320;
+const QR_SMALL_WIDTH = 240;
 /** Shown in the TV race list while a kart's item roulette spins (the phones show the same). */
 const ROLLING_ICON = '🎲';
 
@@ -83,6 +84,7 @@ function runGame(root: HTMLElement): void {
   let roomCode = '';
   let roomUrl = '';
   let qrDataUrl = '';
+  let qrSmallUrl = '';
   /** Why the room is not open yet; shown in the lobby and on results, not over the racing. */
   let roomError: string | null = null;
   let shownMessage: string | null = null;
@@ -104,6 +106,14 @@ function runGame(root: HTMLElement): void {
           },
           () => {
             qrDataUrl = ''; // the code and URL still let phones join
+          },
+        );
+        QRCode.toDataURL(controllerUrl(h.code), { width: QR_SMALL_WIDTH, margin: 1 }).then(
+          (data) => {
+            qrSmallUrl = data;
+          },
+          () => {
+            qrSmallUrl = '';
           },
         );
       },
@@ -148,21 +158,28 @@ function runGame(root: HTMLElement): void {
     rows.length = ranked.length;
     for (let i = 0; i < ranked.length; i++) {
       const k = ranked[i];
-      const row = rows[i] || (rows[i] = { name: '', color: '', lap: 1, item: null });
+      const row = rows[i] || (rows[i] = { name: '', color: '', lap: 1, item: null, finished: false });
       row.name = drivers(k.id).name;
       row.color = k.color;
       row.lap = lapOf(k, track);
       row.item = k.rolling ? ROLLING_ICON : k.item !== null ? getPowerup(k.item)?.icon ?? null : null;
+      row.finished = k.finishedAt !== null;
     }
     return rows;
   };
 
-  // The results hint names whoever is host now, so redraw it if the host changes.
+  // The results hint names whoever is host now, so redraw it if the host changes. The rows are frozen
+  // when the race ends, so a phone joining afterwards never renames a kart it did not drive.
   let resultsHint = '';
-  const showResults = (): void => {
+  let resultRows: { name: string; color: string }[] = [];
+  const showResults = (fresh: boolean): void => {
+    if (fresh) resultRows = rowsFor().map((r) => ({ name: r.name, color: r.color }));
     resultsHint = hostHint(false);
-    hud.results(rowsFor(), resultsHint);
+    hud.results(resultRows, resultsHint);
   };
+  /** After the lobby, friends can still join: a card on results and countdown, a small chip while racing. */
+  const joinMode = (phase: string): JoinMode =>
+    phase === 'results' || phase === 'countdown' ? 'card' : phase === 'racing' ? 'chip' : 'none';
 
   // Phones hear about changes every 100 ms; the lobby screen refreshes on the same beat.
   const tick = (): void => {
@@ -171,7 +188,8 @@ function runGame(root: HTMLElement): void {
     const message = phase === 'lobby' || phase === 'results' ? roomError : null;
     if (message !== shownMessage) hud.message((shownMessage = message));
     if (phase === 'lobby') hud.lobby(roomCode, qrDataUrl, roomUrl, session.lobbySlots(), hostHint(true));
-    else if (phase === 'results' && hostHint(false) !== resultsHint) showResults();
+    else if (phase === 'results' && hostHint(false) !== resultsHint) showResults(false);
+    hud.join(roomCode, qrSmallUrl, roomUrl, joinMode(phase));
   };
   tick();
   window.setInterval(tick, SYNC_MS);
@@ -191,7 +209,10 @@ function runGame(root: HTMLElement): void {
           }
         }
         else if (e.kind === 'finish') session.sendEvent(e.kartId, 'finish');
-        else if (e.kind === 'results') showResults();
+        else if (e.kind === 'results') {
+          showResults(true);
+          hud.join(roomCode, qrSmallUrl, roomUrl, 'card');
+        }
       }
       session.flushKartEvents();
     });
