@@ -12,6 +12,8 @@ import type { Kart } from './kart/kart';
 import type { Vec2 } from './math/vec2';
 import { createScene } from './render/scene';
 import { KartViews } from './render/kartViews';
+import { EntityViews } from './render/entityViews';
+import { getPowerup } from './powerups/registry';
 import { CameraRig } from './render/camera';
 import { Hud, type RaceRow } from './render/hud';
 import { startHost, type NetHost } from './net/host';
@@ -29,6 +31,11 @@ const SYNC_MS = 100;
 const ROOM_RETRY_MS = 5000;
 /** QR image width in px; the library rounds down to whole pixels per module. */
 const QR_WIDTH = 320;
+/** Shown in the TV race list while a kart's item roulette spins (the phones show the same). */
+const ROLLING_ICON = '🎲';
+
+/** Sound effects queued by the powerup world each frame. Audio arrives in Task 13; until then they are dropped. */
+function playSfx(_names: readonly string[]): void {}
 
 function runGame(root: HTMLElement): void {
   const hud = new Hud(root);
@@ -115,6 +122,7 @@ function runGame(root: HTMLElement): void {
 
   const scene = createScene(engine, track);
   const views = new KartViews(scene);
+  const entities = new EntityViews(scene);
   const rig = new CameraRig(scene, track.bounds);
   const stepper = new FixedStepper(60);
 
@@ -133,7 +141,7 @@ function runGame(root: HTMLElement): void {
       row.name = drivers(k.id).name;
       row.color = k.color;
       row.lap = lapOf(k, track);
-      row.item = k.item;
+      row.item = k.rolling ? ROLLING_ICON : k.item !== null ? getPowerup(k.item)?.icon ?? null : null;
     }
     return rows;
   };
@@ -166,11 +174,14 @@ function runGame(root: HTMLElement): void {
         else if (e.kind === 'finish') session.sendEvent(e.kartId, 'finish');
         else if (e.kind === 'results') showResults();
       }
+      session.flushKartEvents();
     });
+    playSfx(game.world.drainSfx());
     const phase = game.race.phase;
     if (phase === 'countdown' || phase === 'racing') hud.race(rowsFor());
 
     views.update(game.karts);
+    entities.update(game.itemBoxes, Math.min(0.1, dt));
     const humanIds = game.humanKartIds();
     framed.length = 0;
     // Lobby: the whole track (no points); then the camera eases in on the humans' karts.

@@ -8,6 +8,7 @@ import { buildTrack } from '../track/track';
 import { TRACK_V1 } from '../track/trackDef';
 import { botInput, createBotBrain, type BotBrain } from './bot';
 import { mulberry32 } from '../test/rand';
+import { createWorld } from '../powerups/world';
 
 const track = buildTrack(TRACK_V1);
 const DT = 1 / 60;
@@ -172,4 +173,44 @@ describe('recovery from a bad pose', () => {
       expect(k.distance).toBeGreaterThan(S);
     });
   }
+});
+
+describe('bot items', () => {
+  test('a held item is used once it has been held reaction + 1 s and its def agrees', () => {
+    const rand = mulberry32(21);
+    const b = createBotBrain(rand);
+    const k = createKart(0, KART_COLORS[0], track.grid[0], track);
+    k.pos = track.pointAt(20);
+    k.heading = track.headingAt(20);
+    k.trackIndex = track.project(k.pos).index;
+    const world = createWorld([k], track);
+    k.item = 'boost'; // the start straight is ahead, so boost agrees at once
+    let firstUse = -1;
+    for (let i = 1; i <= 120 && firstUse < 0; i++) {
+      if (botInput(b, k, track, DT, rand, world).item) firstUse = i * DT;
+    }
+    expect(firstUse).toBeGreaterThanOrEqual(b.reaction + 1);
+    expect(firstUse).toBeLessThan(b.reaction + 1 + 2 * DT);
+    // Once the item is gone the hold timer resets.
+    k.item = null;
+    expect(botInput(b, k, track, DT, rand, world).item).toBe(false);
+    expect(b.heldFor).toBe(0);
+  });
+
+  test('a shield is kept until held 5 s; without a world the bot never fires', () => {
+    const rand = mulberry32(22);
+    const b = createBotBrain(rand);
+    const k = createKart(0, KART_COLORS[0], track.grid[0], track);
+    const world = createWorld([k], track);
+    k.item = 'shield';
+    let firstUse = -1;
+    for (let i = 1; i <= 400 && firstUse < 0; i++) {
+      if (botInput(b, k, track, DT, rand, world).item) firstUse = i * DT;
+    }
+    expect(firstUse).toBeGreaterThan(5);
+    expect(firstUse).toBeLessThan(5 + 2 * DT);
+
+    const b2 = createBotBrain(rand);
+    for (let i = 0; i < 600; i++) expect(botInput(b2, k, track, DT, rand).item).toBe(false);
+  });
 });

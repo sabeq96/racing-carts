@@ -10,6 +10,7 @@ import {
 import { botInput, createBotBrain, type BotBrain } from './bots/bot';
 import type { Driver, Game } from './game';
 import type { PlayerRegistry } from './net/players';
+import { getPowerup } from './powerups/registry';
 import { lapOf, rankKarts } from './race/progress';
 import type { LobbySlot } from './render/hud';
 
@@ -159,10 +160,9 @@ export class Session {
         racers: lobby ? players.length : karts.length,
         lap: kart ? lapOf(kart, this.game.track) : 1,
         totalLaps: TOTAL_LAPS,
-        // Items arrive in Task 11.
-        item: null,
-        itemIcon: null,
-        rolling: false,
+        item: kart ? kart.item : null,
+        itemIcon: kart && kart.item !== null ? getPowerup(kart.item)?.icon ?? null : null,
+        rolling: kart ? kart.rolling !== null : false,
       };
       const json = JSON.stringify(msg);
       const last = this.lastSent.get(p.token);
@@ -177,6 +177,12 @@ export class Session {
     const p = this.registry.bySlot(kartId);
     if (!p || !p.connected || p.token === KEYBOARD_TOKEN) return;
     this.send(p.token, { t: 'event', kind });
+  }
+
+  /** Relays what happened to karts during the latest steps: spin-out hits and finished item rolls. */
+  flushKartEvents(): void {
+    for (const id of this.game.world.drainHits()) this.sendEvent(id, 'hit');
+    for (const id of this.game.drainItemGot()) this.sendEvent(id, 'itemGot');
   }
 
   /** All MAX_PLAYERS slots for the lobby screen: players, then bot slots, then free slots. */
@@ -226,7 +232,7 @@ export class Session {
     for (let i = 0; i < karts.length; i++) {
       if (karts[i].id !== kartId) continue;
       const brain = this.brains[kartId] ?? (this.brains[kartId] = createBotBrain(this.rand));
-      return botInput(brain, karts[i], this.game.track, BOT_DT, this.rand);
+      return botInput(brain, karts[i], this.game.track, BOT_DT, this.rand, this.game.world);
     }
     return NEUTRAL_INPUT;
   }

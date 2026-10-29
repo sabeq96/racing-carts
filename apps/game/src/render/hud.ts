@@ -52,6 +52,7 @@ export interface RaceRow {
   name: string;
   color: string;
   lap: number;
+  /** Icon of the held item (🎲 while rolling), or null. */
   item: string | null;
 }
 
@@ -282,7 +283,11 @@ export class Hud {
         dot(r.color, 44),
         el('div', 'flex:1;min-width:0;font-size:34px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;', r.name),
       );
-      if (r.item) row.append(el('div', `font-size:24px;padding:4px 14px;border-radius:999px;background:#ffe9cf;`, r.item));
+      if (r.item) {
+        row.append(
+          el('div', `font-size:34px;line-height:52px;width:52px;height:52px;text-align:center;border-radius:50%;background:#ffe9cf;flex:none;`, r.item),
+        );
+      }
       row.append(el('div', `font-size:28px;color:${SOFT};white-space:nowrap;`, `${Math.min(r.lap, TOTAL_LAPS)}/${TOTAL_LAPS}`));
       box.append(row);
     });

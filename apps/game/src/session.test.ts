@@ -430,3 +430,64 @@ test('every kart has a brain at race start, including human slots, and a rematch
   stepFor(game, session, 60 * 5);
   for (const k of game.karts.slice(1)) expect(k.speed, `kart ${k.id}`).toBeGreaterThan(8);
 });
+
+test('racing state carries the held item, its icon and the rolling flag', () => {
+  const { game, session } = setup(1);
+  session.onHello('a', 'Ada');
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  session.syncPhones();
+  expect(lastState('a')).toMatchObject({ item: null, itemIcon: null, rolling: false });
+  game.karts[0].rolling = { left: 1, item: 'shield' };
+  session.syncPhones();
+  expect(lastState('a')).toMatchObject({ item: null, itemIcon: null, rolling: true });
+  game.karts[0].rolling = null;
+  game.karts[0].item = 'shield';
+  session.syncPhones();
+  expect(lastState('a')).toMatchObject({ item: 'shield', itemIcon: '🛡️', rolling: false });
+  game.karts[0].item = 'boost';
+  session.syncPhones();
+  expect(lastState('a')).toMatchObject({ item: 'boost', itemIcon: '⚡', rolling: false });
+});
+
+test('hits and finished rolls reach the phone driving that kart', () => {
+  const { game, session } = setup(1);
+  session.onHello('a', 'Ada');
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  const events = () => to('a').filter((m) => m.t === 'event');
+  game.world.hitKart(game.karts[0]);
+  game.world.hitKart(game.karts[1]); // the bot's kart: nobody to tell
+  session.flushKartEvents();
+  expect(events()).toEqual([{ t: 'event', kind: 'hit' }]);
+  const k = game.karts[0];
+  k.pos = { ...game.itemBoxes.boxes[0].pos };
+  k.trackIndex = track.project(k.pos).index; // teleported: refresh the projection hint
+  stepFor(game, session, 1);
+  expect(k.rolling).not.toBeNull();
+  stepFor(game, session, 61);
+  session.flushKartEvents();
+  expect(events()).toEqual([
+    { t: 'event', kind: 'hit' },
+    { t: 'event', kind: 'itemGot' },
+  ]);
+  session.flushKartEvents();
+  expect(events()).toHaveLength(2);
+});
+
+test('bots pick up and use items during a race', () => {
+  const { game, session } = setup(6);
+  session.onHello('a', 'Ada');
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  session.onDisconnect('a');
+  const used: string[] = [];
+  let got = 0;
+  for (let i = 0; i < 60 * 60; i++) {
+    game.step(1 / 60, (id) => session.driverFor(id));
+    got += game.drainItemGot().length;
+    used.push(...game.world.drainSfx());
+  }
+  expect(got).toBeGreaterThan(3);
+  expect(used.filter((s) => s === 'boost' || s === 'shield_up').length).toBeGreaterThan(3);
+});

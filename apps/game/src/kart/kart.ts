@@ -58,6 +58,12 @@ export function createKart(id: number, color: string, slot: Track['grid'][number
   };
 }
 
+/** Seconds left on the kart's `kind` effect (0 when it has none). Allocation-free, for per-frame reads. */
+export function effectLeft(k: Kart, kind: string): number {
+  for (const e of k.effects) if (e.kind === kind) return e.remaining;
+  return 0;
+}
+
 /** Move `v` toward `target` by at most `step` (never overshooting). */
 function approach(v: number, target: number, step: number): number {
   return v < target ? Math.min(target, v + step) : Math.max(target, v - step);
@@ -69,7 +75,7 @@ export function stepKart(k: Kart, input: InputSnapshot, track: Track, dt: number
     k.speed *= Math.exp(-3 * dt);
     k.heading += 10 * dt;
   } else {
-    const boost = k.effects.some((e) => e.kind === 'boost');
+    const boost = effectLeft(k, 'boost') > 0;
     const max = MAX_SPEED * (boost ? BOOST_FACTOR : 1);
     if (k.speed > max) {
       k.speed = Math.max(max, k.speed - ACCEL * dt);
