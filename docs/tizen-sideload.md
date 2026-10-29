@@ -70,7 +70,7 @@ Then open `chrome://inspect` (or `http://localhost:9222`) in desktop Chrome and 
 - **Install fails with a certificate error:** the certificate must include this TV's DUID. Recreate the profile with the TV connected. If an older build is installed with a different certificate, uninstall it first (`tizen uninstall -p RcCarts001.RacingCarts -t <device-name>`), then install again.
 - **`sdb connect` fails or the TV is listed as `offline`:** the Host PC IP typed in Developer mode must be the IP of the computer you are running `sdb` on. If your PC's IP changed, update it on the TV and reboot the TV.
 - **`tizen: command not found`:** add Tizen Studio's `tools/ide/bin` to your `PATH` (step 1).
-- **Black screen on launch:** run with `-d` and look at the DevTools console.
+- **Black screen on launch:** connect DevTools as in step 7 and check the console for errors (the game ships as a single classic script, so a script load error or a JavaScript syntax error is the usual cause).
 
 ## First test: connectivity probe
 

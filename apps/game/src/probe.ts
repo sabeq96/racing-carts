@@ -55,7 +55,7 @@ export function runProbe(hud: HTMLElement): void {
   const qrEl = el(
     'img',
     { alt: 'QR code to join' },
-    'width:360px;height:360px;image-rendering:pixelated;border-radius:24px;margin-top:12px;background:#fff;display:none;',
+    'image-rendering:pixelated;border-radius:24px;margin-top:12px;background:#fff;display:none;',
   );
   const urlEl = el('div', {}, 'font-size:26px;color:#8a7466;margin-top:16px;text-align:center;word-break:break-all;');
   const statusEl = el('div', {}, 'font-size:40px;font-weight:900;color:#5b4638;margin-top:auto;text-align:center;');
@@ -154,10 +154,16 @@ export function runProbe(hud: HTMLElement): void {
         codeEl.style.color = '#5b4638';
         const url = controllerUrl(h.code);
         urlEl.textContent = url.replace(/^https:\/\//, '');
-        QRCode.toDataURL(url, { width: 320, margin: 1 }).then(
+        QRCode.toDataURL(url, { width: 360, margin: 1 }).then(
           (data) => {
+            // The library rounds to whole pixels per module; show the image at exactly its own size
+            // so the TV never rescales it by a fractional factor.
+            qrEl.onload = () => {
+              qrEl.style.width = `${qrEl.naturalWidth}px`;
+              qrEl.style.height = `${qrEl.naturalHeight}px`;
+              qrEl.style.display = 'block';
+            };
             qrEl.src = data;
-            qrEl.style.display = 'block';
           },
           () => {
             qrEl.style.display = 'none';
