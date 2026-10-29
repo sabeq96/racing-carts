@@ -62,8 +62,12 @@ describe('clouds', () => {
     expect(screenFade(0, 0)).toBe(0);
     expect(screenFade(0.3, 0.3)).toBe(0);
     expect(screenFade(0.9, 0)).toBe(1);
-    expect(screenFade(0, 1.1)).toBe(1);
-    expect(screenFade(-0.85, -0.6)).toBe(1);
+    expect(screenFade(0, 1.2)).toBe(1);
+    expect(screenFade(0.7, 0.85)).toBe(1); // top corners
+    expect(screenFade(-0.9, -0.2)).toBe(1);
+    // The bottom of the screen is the near ground: a cloud there would be a big blob.
+    expect(screenFade(-0.85, -0.7)).toBe(0);
+    expect(screenFade(0.9, -1)).toBe(0);
     const mid = screenFade(0.62, 0);
     expect(mid).toBeGreaterThan(0);
     expect(mid).toBeLessThan(1);
@@ -73,9 +77,9 @@ describe('clouds', () => {
 describe('cloud size on screen', () => {
   test('clouds right by the lens shrink away; distant ones stay', () => {
     expect(nearFade(20)).toBe(0);
-    expect(nearFade(40)).toBe(0);
-    expect(nearFade(47.5)).toBeCloseTo(0.5);
-    expect(nearFade(55)).toBe(1);
+    expect(nearFade(30)).toBe(0);
+    expect(nearFade(37.5)).toBeCloseTo(0.5);
+    expect(nearFade(45)).toBe(1);
     expect(nearFade(200)).toBe(1);
   });
 });

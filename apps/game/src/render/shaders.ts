@@ -171,7 +171,7 @@ void main() {
     `varying vec2 vUv;
 void main() {
   float r = length(vUv - 0.5) * 2.0;
-  float a = (1.0 - smoothstep(0.2, 1.0, r)) * 0.12;
+  float a = (1.0 - smoothstep(0.45, 1.0, r)) * 0.13;
   gl_FragColor = vec4(vec3(0.24, 0.27, 0.4), a);
 }`,
     { attributes: ['uv'], alpha: true },

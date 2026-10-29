@@ -95,19 +95,21 @@ export function edgeFade(x: number, z: number, area: Area, band: number): number
 /**
  * 1 for a cloud whose centre is out near the screen edges, shrinking to 0 over the middle of the view
  * (screen coordinates in [-1, 1]), where the camera frames the karts: clouds never hide the race.
+ * The bottom of the screen is the near ground, so clouds there would be big blobs: they go too.
  */
 export function screenFade(sx: number, sy: number): number {
-  const e = Math.hypot(sx / 0.62, sy / 0.85);
+  const e = Math.hypot(sx / 0.62, sy / 0.95);
   const t = Math.max(0, Math.min(1, (e - 0.85) / 0.3));
-  return t * t * (3 - 2 * t);
+  const low = Math.max(0, Math.min(1, (-sy - 0.3) / 0.3));
+  return t * t * (3 - 2 * t) * (1 - low * low * (3 - 2 * low));
 }
 
 /**
- * 0 for a cloud nearer the camera than 40 m (`depth`: its view depth), 1 beyond 55 m: closer than
- * that a cloud would fill a big part of the screen, so up close they only hang in the distance.
+ * 0 for a cloud nearer the camera than 30 m (`depth`: its view depth), 1 beyond 45 m: closer than
+ * that a cloud would fill a big part of the screen, so up close they only peek in at the top.
  */
 export function nearFade(depth: number): number {
-  const t = Math.max(0, Math.min(1, (depth - 40) / 15));
+  const t = Math.max(0, Math.min(1, (depth - 30) / 15));
   return t * t * (3 - 2 * t);
 }
 
