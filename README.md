@@ -30,9 +30,13 @@ TV URL flags:
 | --- | --- |
 | `?keyboard=1` | Adds you as a player: arrows/WASD drive, Space uses the item, Enter starts or rematches |
 | `?bots=N` | At most N bots (default: fill every free slot) |
-| `?aa=0` | Turns antialiasing off, if the TV struggles |
+| `?aa=1` / `?aa=0` | Forces antialiasing on / off (default: off on the TV, on elsewhere) |
 | `?probe=1` | Connectivity probe instead of the game: one dot per phone |
 | `?give=rocket` | Dev only, with `?keyboard=1`: your kart gets that item at GO (`shield`, `boost`, `mine`, `rocket`) |
+
+The packaged TV app has no address bar. To use a flag on the TV, put it in `apps/game/public/config.xml`
+(for example `<content src="index.html?probe=1"/>`), then rebuild and reinstall. See
+[docs/tizen-sideload.md](docs/tizen-sideload.md#url-flags-on-the-tv).
 
 ## Ship it
 
@@ -44,6 +48,7 @@ tizen install -n apps/game/dist/RacingCarts.wgt -t <device-name>
 ```
 
 **Phones (GitHub Pages), one time:** in GitHub open **Settings → Pages** and set **Source** to **GitHub Actions**.
+Free GitHub Pages needs a **public** repository (Pages from a private repository needs a paid plan).
 Then create `main` from this branch and push it:
 
 ```bash
@@ -55,9 +60,16 @@ Then check that `https://sabeq96.github.io/racing-carts/?address=TEST` opens the
 
 ## First couch test
 
-Sideload the new `.wgt`, open it, join with two or more phones and let bots fill the rest. Play one full race and a rematch.
-Note: did every phone join, does tilt steering feel right, can you read the TV from the couch, is anything laggy,
-and are the bots too easy or too hard. The sounds are silent placeholders for now.
+1. Sideload the new `.wgt` and open it.
+2. Join with **one** phone first. If it never gets in, stop and see
+   "Phones can't connect (WebRTC)" in [docs/tizen-sideload.md](docs/tizen-sideload.md#phones-cant-connect-webrtc).
+3. Join with the other phones and let bots fill the rest. Play one full race and a rematch.
+4. Check:
+   - the emoji icons (items 🛡️ ⚡ 💣 🚀, 🎲, 🏁) render on the TV, not as empty boxes;
+   - no screen saver kicks in during a 20-minute session;
+   - a late friend can join after race 1 (scan the join card on the results screen) and drives in the next race.
+5. Note: did every phone join, does tilt steering feel right, can you read the TV from the couch, is anything laggy,
+   and are the bots too easy or too hard. The sounds are silent placeholders for now.
 
 ## More docs
 

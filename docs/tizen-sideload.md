@@ -75,25 +75,55 @@ Then open `chrome://inspect` (or `http://localhost:9222`) in desktop Chrome and 
 
 ## First couch test
 
-Start the app on the TV and follow "First couch test" in the [README](../README.md): phones scan the QR code, the host taps **Start race**, and you play one full race plus a rematch.
+Start the app on the TV and follow "First couch test" in the [README](../README.md): join with **one** phone first, then the rest, and play one full race plus a rematch.
 
-## Connectivity probe (if phones cannot connect)
+## URL flags on the TV
 
-The app starts the game. The **connectivity probe** from the first build is still there for debugging: it only proves that phones can reach the host over WebRTC (PeerJS). Open the game with `?probe=1` in a browser (for example `npm run dev -w game`, then add `?probe=1` to the URL).
+In a browser the game takes flags in the address (`?probe=1`, `?aa=0`, `?bots=3`, … listed in the README). The packaged TV app has no address bar, so the flags go into the start page in `apps/game/public/config.xml`:
 
-1. Open the probe page.
-2. The TV shows a big 4-letter **room code**, a **QR code** and the controller address. If it shows "No internet — can't create room", the TV cannot reach the PeerJS broker (`0.peerjs.com`); check the TV's network and that it retries every 5 seconds.
-3. Scan the QR code with **two phones** (any browser; they do not need to be on the TV's Wi-Fi network, but being on it helps).
-4. Each phone enters a name and taps **Tap to start**. A coloured dot per phone appears on the TV and the TV text says "2 players connected".
+```xml
+<content src="index.html?probe=1"/>
+```
+
+Then rebuild and reinstall (steps 5 and 6). Change it back to `index.html` afterwards.
+
+This has not been checked on a real TV yet: Tizen's docs only show a plain file name in `content src`, so **try** it. If the app then fails to start or ignores the flag, put `index.html` back and use the fallback below (a desktop browser on the same Wi-Fi). Antialiasing needs no flag on the TV: it is off by default there.
+
+## Connectivity probe
+
+The probe replaces the game with a bare connection test: it opens a room and draws one dot per phone that moves with the phone's tilt, gas and item. It shows whether phones can reach **the device it runs on** over WebRTC (PeerJS).
+
+- **On the TV** (tests the TV itself): enable it with `content src="index.html?probe=1"` as above.
+- **Fallback, in a desktop browser on the same Wi-Fi** (`npm run dev -w game`, then add `?probe=1` to the URL): this tests the broker, the phones and the network, **not** the TV. If it works on the laptop but phones cannot join the TV, the problem is on the TV side (see below).
+
+1. Open the probe.
+2. It shows a big 4-letter **room code**, a **QR code** and the controller address. If it shows "No internet — can't create room", that device cannot reach the PeerJS broker (`0.peerjs.com`); check its network. It retries every 5 seconds.
+3. Scan the QR code with **two phones** (any browser; they do not need to be on the same Wi-Fi, but being on it helps).
+4. Each phone enters a name and taps **Tap to start**. A coloured dot per phone appears and the text says "2 players connected".
 5. On the first phone (the host) tap **Start race**. Both phones switch to the drive screen.
 6. Tilt the phones and hold **GAS** and **ITEM**: each phone's dot should move left/right with the tilt, rise while gas is held, and pulse when ITEM is tapped. Both dots must move.
-7. Result to report: did the room open, did both phones connect, did both dots move, and was it smooth?
+7. Result to report: which device ran the probe, did the room open, did both phones connect, did both dots move, and was it smooth?
 
-If the room opens but phones never connect, WebRTC does not work on the TV or network; that decides whether we need a `wss://` relay instead of PeerJS.
+## Phones can't connect (WebRTC)
+
+WebRTC on the TV is the biggest untested part. Symptoms: the TV shows a room code, but a phone stays on "Joining…" and after 15 s says "Can't find room".
+
+Why it can happen: PeerJS uses webrtc-adapter, which guesses the browser from the user agent. The Samsung TV's user agent (`SMART-TV; Tizen …`) may confuse that detection, so PeerJS may treat the TV as an unsupported browser or use the wrong WebRTC quirks.
+
+What to do:
+
+1. Run the probe **on the TV** (`content src="index.html?probe=1"`, see "URL flags on the TV"), then rebuild and reinstall.
+2. Attach DevTools as in step 7 and open the **Console**.
+3. Join with one phone and note every error or warning (look for `peerjs`, `webrtc`, `RTCPeerConnection`, "browser not supported" or ICE errors).
+4. Also run the probe in a desktop browser on the same Wi-Fi: if that works, the network and broker are fine and the problem is the TV.
+
+The fix may need PeerJS's adapter to be told the browser details (Chrome, version 85) instead of guessing from the user agent. That is a code change for a later session; bring the console logs from step 3.
 
 ## Deploying the phone controller (GitHub Pages)
 
 The controller is deployed by `.github/workflows/deploy-controller.yml` on every push to `main` (or by hand from the Actions tab). One-time setup in the GitHub repository:
+
+Free GitHub Pages needs a **public** repository; Pages from a private repository needs a paid GitHub plan.
 
 1. Make sure a `main` branch exists with this code.
 2. Go to **Settings > Pages** and set **Source** to **GitHub Actions**.
