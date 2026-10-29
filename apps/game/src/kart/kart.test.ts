@@ -80,6 +80,15 @@ describe('kart physics', () => {
     expect(minSeen).toBeGreaterThanOrEqual(-REVERSE_MAX - 1e-6);
   });
 
+  test('brake works above top speed too (e.g. just after a boost ends)', () => {
+    const k = freshKart();
+    k.speed = 30;
+    k.vel = { x: 0, z: 30 };
+    run(k, brake, 0.25);
+    // Hard braking (24 m/s²), not the gentle over-max ease-off (12 m/s²).
+    expect(k.speed).toBeLessThan(25);
+  });
+
   test('steer > 0 increases heading (turns right)', () => {
     const k = freshKart();
     k.speed = 10;

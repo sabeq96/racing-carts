@@ -78,11 +78,11 @@ export function stepKart(k: Kart, input: InputSnapshot, track: Track, dt: number
   } else {
     const boost = effectLeft(k, 'boost') > 0;
     const max = MAX_SPEED * (boost ? BOOST_FACTOR : 1);
-    if (k.speed > max) {
-      k.speed = Math.max(max, k.speed - ACCEL * dt);
-    } else if (input.brake) {
-      // Brake wins over gas. Hard braking while rolling forward, gentler reverse acceleration from rest.
+    if (input.brake) {
+      // Brake wins over gas, also above top speed. Hard braking while rolling forward, gentler reverse from rest.
       k.speed = Math.max(-REVERSE_MAX, k.speed - (k.speed > 0 ? BRAKE_DECEL : ACCEL) * dt);
+    } else if (k.speed > max) {
+      k.speed = Math.max(max, k.speed - ACCEL * dt);
     } else if (input.gas) {
       k.speed = Math.min(max, k.speed + ACCEL * dt);
     } else {
