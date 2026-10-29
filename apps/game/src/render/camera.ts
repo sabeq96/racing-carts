@@ -22,6 +22,12 @@ const BLEND_FROM = 0.7;
 /** Per-second rate of the exponential follow. */
 const FOLLOW_RATE = 3;
 
+/** Camera shake: trauma a hit on a human kart adds (capped at 1), fading out over SHAKE_FADE seconds. */
+export const HIT_TRAUMA = 0.5;
+const SHAKE_FADE = 0.4;
+/** The target moves by trauma² × SHAKE_AMPLITUDE metres of smooth noise, so a single hit is a soft nudge. */
+export const SHAKE_AMPLITUDE = 0.6;
+
 const SIN_B = Math.sin(CAMERA_BETA);
 const COS_B = Math.cos(CAMERA_BETA);
 const TAN_HALF_FOV = Math.tan(CAMERA_FOV / 2);
@@ -134,10 +140,36 @@ export function fitCamera(points: Vec2[], aspect: number, bounds: Track['bounds'
   return { target: { x: cx, z: cz + perspectiveOffset(radius, hz) }, radius };
 }
 
+/** Trauma after `dt` seconds: a hit's HIT_TRAUMA fades linearly to 0 in SHAKE_FADE seconds. */
+export function decayTrauma(trauma: number, dt: number): number {
+  return Math.max(0, trauma - (HIT_TRAUMA / SHAKE_FADE) * dt);
+}
+
+/**
+ * Writes the shake offset (m) for `trauma` at `time` into `out`: trauma² × SHAKE_AMPLITUDE times two
+ * slow sums of sines in [−1, 1], so the view sways rather than jitters. Allocation-free.
+ */
+export function shakeOffset(trauma: number, time: number, out: Vec2): void {
+  const a = trauma * trauma * SHAKE_AMPLITUDE;
+  if (a === 0) {
+    out.x = 0;
+    out.z = 0;
+    return;
+  }
+  out.x = a * (0.6 * Math.sin(time * 17) + 0.4 * Math.sin(time * 11.3 + 1.7));
+  out.z = a * (0.6 * Math.sin(time * 13.7 + 0.4) + 0.4 * Math.sin(time * 19.1 + 2.9));
+}
+
 /** One shared ArcRotateCamera with fixed angles that eases towards the framing of the given karts. */
 export class CameraRig {
   readonly camera: ArcRotateCamera;
   private snapped = false;
+  /** Where the camera looks without shake (the eased framing); the shake is added on top. */
+  private baseX = 0;
+  private baseZ = 0;
+  private trauma = 0;
+  private time = 0;
+  private readonly shake: Vec2 = { x: 0, z: 0 };
 
   constructor(scene: Scene, private bounds: Track['bounds']) {
     const c = (this.bounds.minX + this.bounds.maxX) / 2, z = (this.bounds.minZ + this.bounds.maxZ) / 2;
@@ -147,16 +179,28 @@ export class CameraRig {
     this.camera.maxZ = 2000;
     // No user control: the rig owns the camera.
     this.camera.inputs.clear();
+    this.baseX = c;
+    this.baseZ = z;
   }
 
-  /** Moves towards the framing of `points` (snaps on the first call). */
+  /** A human kart was hit: shake the view a little (HIT_TRAUMA per hit, capped at 1). */
+  addTrauma(amount: number): void {
+    this.trauma = Math.min(1, this.trauma + amount);
+  }
+
+  /** Moves towards the framing of `points` (snaps on the first call), plus any shake. */
   update(points: Vec2[], aspect: number, dt: number): void {
     const want = fitCamera(points, aspect, this.bounds);
     const t = this.snapped ? 1 - Math.exp(-FOLLOW_RATE * dt) : 1;
     this.snapped = true;
     const cam = this.camera;
-    const target = cam.target; // the camera reads this vector every frame
-    target.copyFromFloats(target.x + (want.target.x - target.x) * t, 0, target.z + (want.target.z - target.z) * t);
+    this.baseX += (want.target.x - this.baseX) * t;
+    this.baseZ += (want.target.z - this.baseZ) * t;
+    this.time += dt;
+    this.trauma = decayTrauma(this.trauma, dt);
+    shakeOffset(this.trauma, this.time, this.shake);
+    // The camera reads this vector every frame.
+    cam.target.copyFromFloats(this.baseX + this.shake.x, 0, this.baseZ + this.shake.z);
     cam.radius += (want.radius - cam.radius) * t;
     cam.alpha = CAMERA_ALPHA;
     cam.beta = CAMERA_BETA;

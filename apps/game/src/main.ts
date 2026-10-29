@@ -14,13 +14,14 @@ import { createScene } from './render/scene';
 import { KartViews } from './render/kartViews';
 import { EntityViews } from './render/entityViews';
 import { getPowerup } from './powerups/registry';
-import { CameraRig } from './render/camera';
+import { CameraRig, HIT_TRAUMA } from './render/camera';
+import { SparkViews } from './render/sparks';
 import { Hud, type JoinMode, type RaceRow } from './render/hud';
 import { startHost, type NetHost } from './net/host';
 import { PlayerRegistry } from './net/players';
 import { KEYBOARD_TOKEN, Session } from './session';
 import { createAudio } from './audio/audio';
-import { SoundDirector } from './audio/director';
+import { SoundDirector, type DirectorSource } from './audio/director';
 
 const hudRoot = document.getElementById('hud');
 if (!hudRoot) throw new Error('missing #hud');
@@ -56,6 +57,10 @@ function runGame(root: HTMLElement): void {
   const antialias = aaParam === '1' ? true : aaParam === '0' ? false : !onTv;
   // DEV ONLY (screenshots): `?keyboard=1&give=<item id>` hands the keyboard kart that item at GO.
   const giveItem = keyboardOn ? params.get('give') : null;
+  // DEV ONLY (screenshots): `?keyboard=1&steer=0.4` softens the all-or-nothing arrow keys to a gentle phone
+  // tilt, so a keyboard drift can be held through a corner.
+  const steerParam = Number.parseFloat(params.get('steer') ?? '');
+  const keyboardSteer = Number.isFinite(steerParam) ? Math.max(0, Math.min(1, steerParam)) : 1;
 
   let engine: Engine;
   try {
@@ -78,7 +83,15 @@ function runGame(root: HTMLElement): void {
   let net: NetHost | null = null;
   const session = new Session(game, registry, (token, msg) => net?.send(token, msg), {
     maxBots,
-    keyboard: keyboard ?? undefined,
+    keyboard: keyboard
+      ? {
+          input: () => {
+            const input = keyboard.input();
+            input.steer *= keyboardSteer;
+            return input;
+          },
+        }
+      : undefined,
     onJoin: () => sounds.playerJoined(),
   });
   const drivers = (id: number): Driver => session.driverFor(id);
@@ -148,7 +161,23 @@ function runGame(root: HTMLElement): void {
   const views = new KartViews(scene);
   const entities = new EntityViews(scene);
   const rig = new CameraRig(scene, track.bounds);
+  const sparks = new SparkViews(scene, track);
   const stepper = new FixedStepper(60);
+  // Wall hits feed both the sparks and the sounds: drained once per frame, then handed to the director.
+  let frameWallHits: readonly number[] = [];
+  const soundSource: DirectorSource = {
+    drainWallHits: () => frameWallHits,
+    drainKartBumps: () => game.drainKartBumps(),
+    get world() {
+      return game.world;
+    },
+    get race() {
+      return game.race;
+    },
+    get karts() {
+      return game.karts;
+    },
+  };
 
   // Reused every frame so the render loop does not allocate.
   const ranked: Kart[] = [];
@@ -217,14 +246,18 @@ function runGame(root: HTMLElement): void {
           hud.join(roomCode, qrSmallUrl, roomUrl, 'card');
         }
       }
-      session.flushKartEvents();
+      // A hit on a human kart gives the shared camera a soft shake.
+      const humans = game.humanKartIds();
+      for (const id of session.flushKartEvents()) if (humans.indexOf(id) >= 0) rig.addTrauma(HIT_TRAUMA);
     });
-    sounds.frame(game, performance.now());
+    frameWallHits = game.drainWallHits();
+    sounds.frame(soundSource, performance.now());
     const phase = game.race.phase;
     if (phase === 'countdown' || phase === 'racing') hud.race(rowsFor());
 
     views.update(game.karts);
     entities.update(game.itemBoxes, game.world.entities, Math.min(0.1, dt));
+    sparks.update(game.karts, frameWallHits, Math.min(0.1, dt));
     const humanIds = game.humanKartIds();
     framed.length = 0;
     // Lobby: the whole track (no points); then the camera eases in on the humans' karts.

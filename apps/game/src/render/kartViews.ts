@@ -18,8 +18,9 @@ const MAX_LEAN = 0.16;
 const LEAN_PER_SLIP = 0.05;
 const LEAN_RATE = 10;
 /** Karts are drawn a touch larger than their physics radius so they read from the couch. */
-const VISUAL_SCALE = 1.15;
-const WHEEL_X = 0.86, WHEEL_Z = 0.78, WHEEL_R = 0.34;
+export const VISUAL_SCALE = 1.15;
+export const WHEEL_X = 0.86, WHEEL_Z = 0.78;
+const WHEEL_R = 0.34;
 /** Shield bubble: diameter (kart-local m), centre height, and how long before it runs out it blinks. */
 const BUBBLE_D = 3.2;
 const BUBBLE_Y = 0.85;

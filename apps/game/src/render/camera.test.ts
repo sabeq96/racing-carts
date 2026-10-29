@@ -6,7 +6,19 @@ import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { buildTrack } from '../track/track';
 import { TRACK_V1 } from '../track/trackDef';
 import type { Vec2 } from '../math/vec2';
-import { CAMERA_ALPHA, CAMERA_BETA, CAMERA_FOV, MIN_RADIUS, fitCamera, wholeTrackRadius } from './camera';
+import {
+  CAMERA_ALPHA,
+  CAMERA_BETA,
+  CAMERA_FOV,
+  CameraRig,
+  HIT_TRAUMA,
+  MIN_RADIUS,
+  SHAKE_AMPLITUDE,
+  decayTrauma,
+  fitCamera,
+  shakeOffset,
+  wholeTrackRadius,
+} from './camera';
 
 const track = buildTrack(TRACK_V1);
 const b = track.bounds;
@@ -117,4 +129,51 @@ test('fitCamera: framed karts always project inside NDC [-0.9, 0.9] at 16:9', ()
     }
   }
   expect(filled).toBeGreaterThan(50);
+});
+
+test('shake: a hit adds 0.5 trauma that fades out over 0.4 s', () => {
+  expect(HIT_TRAUMA).toBe(0.5);
+  let t = HIT_TRAUMA;
+  for (let i = 0; i < 12; i++) t = decayTrauma(t, 1 / 60);
+  expect(t).toBeGreaterThan(0.2);
+  for (let i = 0; i < 12; i++) t = decayTrauma(t, 1 / 60);
+  expect(t).toBeLessThan(1e-9);
+  expect(decayTrauma(0, 1)).toBe(0);
+});
+
+test('shake: offset is trauma² × 0.6 m of smooth noise, and none without trauma', () => {
+  expect(SHAKE_AMPLITUDE).toBe(0.6);
+  const out = { x: 0, z: 0 };
+  shakeOffset(0, 1.23, out);
+  expect(out).toEqual({ x: 0, z: 0 });
+  let biggest = 0;
+  let prev = { x: 0, z: 0 };
+  let jump = 0;
+  for (let i = 0; i < 600; i++) {
+    shakeOffset(0.5, i / 60, out);
+    biggest = Math.max(biggest, Math.hypot(out.x, out.z));
+    if (i > 0) jump = Math.max(jump, Math.hypot(out.x - prev.x, out.z - prev.z));
+    prev = { x: out.x, z: out.z };
+  }
+  expect(biggest).toBeLessThanOrEqual(0.25 * 0.6 * Math.SQRT2 + 1e-9);
+  expect(biggest).toBeGreaterThan(0.25 * 0.6 * 0.5);
+  expect(jump).toBeLessThan(0.05); // smooth: small moves frame to frame
+});
+
+test('CameraRig: a hit shakes the view briefly, then it settles exactly where it would have been', () => {
+  const calm = new CameraRig(scene, b);
+  const shaken = new CameraRig(scene, b);
+  const pts = [{ x: 10, z: 20 }];
+  calm.update(pts, aspect, 1 / 60);
+  shaken.update(pts, aspect, 1 / 60);
+  shaken.addTrauma(HIT_TRAUMA);
+  let moved = 0;
+  for (let i = 0; i < 30; i++) {
+    calm.update(pts, aspect, 1 / 60);
+    shaken.update(pts, aspect, 1 / 60);
+    moved = Math.max(moved, Vector3.Distance(calm.camera.target, shaken.camera.target));
+  }
+  expect(moved).toBeGreaterThan(0.01);
+  expect(moved).toBeLessThan(0.25);
+  expect(Vector3.Distance(calm.camera.target, shaken.camera.target)).toBeLessThan(1e-9);
 });

@@ -602,7 +602,8 @@ test('hits and finished rolls reach the phone driving that kart', () => {
   const events = () => to('a').filter((m) => m.t === 'event');
   game.world.hitKart(game.karts[0]);
   game.world.hitKart(game.karts[1]); // the bot's kart: nobody to tell
-  session.flushKartEvents();
+  // Every hit kart id comes back too (the TV shakes its camera for human karts).
+  expect(session.flushKartEvents()).toEqual([0, 1]);
   expect(events()).toEqual([{ t: 'event', kind: 'hit' }]);
   const k = game.karts[0];
   k.pos = { ...game.itemBoxes.boxes[0].pos };
@@ -615,7 +616,7 @@ test('hits and finished rolls reach the phone driving that kart', () => {
     { t: 'event', kind: 'hit' },
     { t: 'event', kind: 'itemGot' },
   ]);
-  session.flushKartEvents();
+  expect(session.flushKartEvents()).toEqual([]);
   expect(events()).toHaveLength(2);
 });
 

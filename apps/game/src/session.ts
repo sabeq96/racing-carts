@@ -231,10 +231,15 @@ export class Session {
     return out;
   }
 
-  /** Relays what happened to karts during the latest steps: spin-out hits and finished item rolls. */
-  flushKartEvents(): void {
-    for (const id of this.game.world.drainHits()) this.sendEvent(id, 'hit');
+  /**
+   * Relays what happened to karts during the latest steps: spin-out hits and finished item rolls. Returns
+   * the ids of the karts that were hit (for the TV's camera shake).
+   */
+  flushKartEvents(): readonly number[] {
+    const hits = this.game.world.drainHits();
+    for (const id of hits) this.sendEvent(id, 'hit');
     for (const id of this.game.drainItemGot()) this.sendEvent(id, 'itemGot');
+    return hits;
   }
 
   /** All MAX_PLAYERS slots for the lobby screen: players, then bot slots, then free slots. */
