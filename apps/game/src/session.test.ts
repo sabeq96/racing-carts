@@ -7,6 +7,18 @@ import { PlayerRegistry } from './net/players';
 import { KEYBOARD_TOKEN, Session } from './session';
 
 const track = buildTrack(TRACK_V1);
+
+/** Deterministic PRNG so bot personalities (and so these tests) are reproducible. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 type StateMsg = Extract<ServerMsg, { t: 'state' }>;
 
 let sent: { token: string; msg: ServerMsg }[];
@@ -29,7 +41,7 @@ let clock = 0;
 function setup(maxBots = 6, keyboard?: { input(): InputSnapshot }) {
   const game = new Game(track);
   const registry = new PlayerRegistry();
-  const session = new Session(game, registry, send, { maxBots, keyboard, now: () => clock });
+  const session = new Session(game, registry, send, { maxBots, keyboard, now: () => clock, rand: mulberry32(42) });
   return { game, registry, session };
 }
 
@@ -111,10 +123,10 @@ test('phone input drives its kart only while racing', () => {
   session.onMessage('a', { t: 'input', ...gasOnly });
   session.onMessage('stranger', { t: 'input', steer: 1, gas: true, brake: false, item: false });
   expect(session.driverFor(0).input()).toEqual(gasOnly);
-  expect(session.driverFor(1).input()).toEqual(NEUTRAL_INPUT);
+  expect(session.driverFor(1).input().gas).toBe(true); // slot 1 is a bot, not the stranger
   stepFor(game, session, 60);
   expect(game.karts[0].speed).toBeGreaterThan(5);
-  expect(game.karts[1].speed).toBe(0);
+  expect(game.karts[1].speed).toBeGreaterThan(5); // the bot drives itself; 'stranger' steer=1 had no effect
 });
 
 test('disconnect mid-race → driverFor returns bot; rejoin with same token → human again, same kart', () => {
@@ -130,7 +142,7 @@ test('disconnect mid-race → driverFor returns bot; rejoin with same token → 
   const bot = session.driverFor(1);
   expect(bot.kind).toBe('bot');
   expect(bot.name).toBe('Bea'); // the kart keeps its owner's name while a bot drives it
-  expect(bot.input()).toEqual(NEUTRAL_INPUT);
+  expect(bot.input().gas).toBe(true); // the bot takes over the dropped player's kart and drives it
   session.onMessage('b', { t: 'input', ...gasOnly }); // late packet from a dropped phone
   expect(session.driverFor(1).kind).toBe('bot');
 
@@ -388,4 +400,43 @@ test('lobbySlots: players with host flag, bot slots up to the kart count, then f
     { name: '', color: KART_COLORS[4], bot: false, host: false },
     { name: '', color: KART_COLORS[5], bot: false, host: false },
   ]);
+});
+
+test('bots drive: empty slots and a dropped player\'s kart advance on their own and keep going', () => {
+  const { game, session } = setup(4);
+  session.onHello('a', 'Ada');
+  session.onHello('b', 'Bea');
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  session.onDisconnect('b');
+  const start = game.karts.map((k) => k.distance);
+  stepFor(game, session, 60 * 12);
+  for (const id of [1, 2, 3]) {
+    expect(game.karts[id].distance - start[id], `kart ${id}`).toBeGreaterThan(100);
+    expect(game.karts[id].speed, `kart ${id}`).toBeGreaterThan(8);
+  }
+  // Ada is a human sending nothing: no bot drives her kart (bumps from passing bots may nudge it).
+  expect(session.driverFor(0)).toMatchObject({ kind: 'human' });
+  expect(session.driverFor(0).input()).toEqual(NEUTRAL_INPUT);
+});
+
+test('every kart has a brain at race start, including human slots, and a rematch gives fresh ones', () => {
+  const { game, session } = setup(2);
+  session.onHello('a', 'Ada');
+  session.onMessage('a', { t: 'start' });
+  stepUntil(game, session, 'racing');
+  session.onDisconnect('a'); // human slot 0 is now a bot
+  stepFor(game, session, 30);
+  expect(game.karts[0].speed).toBeGreaterThan(0);
+  for (const k of game.karts) {
+    k.distance = 3 * track.length + 1; // everyone done
+    k.finishedAt = 1;
+  }
+  stepUntil(game, session, 'results', 600);
+  expect(game.race.phase).toBe('results');
+  session.onHello('a', 'Ada');
+  session.onMessage('a', { t: 'rematch' });
+  stepUntil(game, session, 'racing');
+  stepFor(game, session, 60 * 5);
+  for (const k of game.karts.slice(1)) expect(k.speed, `kart ${k.id}`).toBeGreaterThan(8);
 });

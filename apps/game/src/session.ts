@@ -7,6 +7,7 @@ import {
   type InputSnapshot,
   type ServerMsg,
 } from '@rc/shared';
+import { botInput, createBotBrain, type BotBrain } from './bots/bot';
 import type { Driver, Game } from './game';
 import type { PlayerRegistry } from './net/players';
 import { lapOf, rankKarts } from './race/progress';
@@ -17,6 +18,9 @@ export const KEYBOARD_TOKEN = 'keyboard';
 /** Names for karts nobody owns; they follow the slot colours. */
 export const BOT_NAMES: readonly string[] = ['Coral', 'Sky', 'Mint', 'Butter', 'Lavender', 'Peach'];
 
+/** The simulation runs at a fixed 60 Hz (see FixedStepper), so bot drivers step their brain by this much. */
+const BOT_DT = 1 / 60;
+
 type StateMsg = Extract<ServerMsg, { t: 'state' }>;
 
 export interface SessionOptions {
@@ -25,6 +29,8 @@ export interface SessionOptions {
   keyboard?: { input(): InputSnapshot };
   /** Clock in ms (default `performance.now`); injectable for tests. */
   now?: () => number;
+  /** Random source for bot personalities (default `Math.random`); injectable for tests. */
+  rand?: () => number;
 }
 
 /** Unchanged state is still resent this often, so a phone can tell a quiet TV from a lost one. */
@@ -43,6 +49,9 @@ export class Session {
   /** One reusable driver per token / slot, so the render loop allocates nothing. */
   private humanDrivers = new Map<string, Driver>();
   private botDrivers: Driver[];
+  /** One brain per kart id, created at every race start (human slots too, for when they drop). */
+  private brains: BotBrain[] = [];
+  private readonly rand: () => number;
 
   constructor(
     private game: Game,
@@ -51,7 +60,8 @@ export class Session {
     private opts: SessionOptions,
   ) {
     this.now = opts.now ?? (() => performance.now());
-    this.botDrivers = BOT_NAMES.map((name): Driver => ({ kind: 'bot', name, input: () => NEUTRAL_INPUT }));
+    this.rand = opts.rand ?? Math.random;
+    this.botDrivers = BOT_NAMES.map((name, id): Driver => ({ kind: 'bot', name, input: () => this.botInputFor(id) }));
     if (opts.keyboard) registry.join(KEYBOARD_TOKEN, 'Keyboard', game.race.phase);
     this.refreshLobbyKarts();
   }
@@ -204,9 +214,21 @@ export class Session {
 
   private startRace(karts: number): void {
     this.game.setupKarts(karts);
+    this.brains = this.game.karts.map(() => createBotBrain(this.rand));
     this.inputs.clear();
     this.game.race.start();
     this.syncPhones();
+  }
+
+  /** What the bot driving `kartId` does this step. Allocation-free apart from the input snapshot itself. */
+  private botInputFor(kartId: number): InputSnapshot {
+    const karts = this.game.karts;
+    for (let i = 0; i < karts.length; i++) {
+      if (karts[i].id !== kartId) continue;
+      const brain = this.brains[kartId] ?? (this.brains[kartId] = createBotBrain(this.rand));
+      return botInput(brain, karts[i], this.game.track, BOT_DT, this.rand);
+    }
+    return NEUTRAL_INPUT;
   }
 
   /** Lobby only: drops players whose grace period ran out (afterwards a dropped slot is kept for good). */
