@@ -14,6 +14,8 @@ const FALLBACK_NAME_MAX = 12;
 const DEFAULT_NAME = 'Player';
 /** No `welcome` this long after tapping start: the code is probably wrong or the TV is off. */
 const JOIN_TIMEOUT_MS = 15000;
+/** Reconnecting this long after being in a room: the TV app was probably restarted (it then has a new code). */
+const ROOM_GONE_MS = 30000;
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
@@ -44,6 +46,7 @@ const els = {
   resultText: $('resultText'),
   rematchBtn: $<HTMLButtonElement>('rematchBtn'),
   resultWait: $('resultWait'),
+  finishBanner: $('finishBanner'),
 };
 
 // ---------- small helpers ----------
@@ -117,6 +120,14 @@ let isHost = false;
 let buttonSteer = false;
 let started = false;
 let joinTimer: ReturnType<typeof setTimeout> | undefined;
+/** The room code last dialled, offered for editing if the room turns out wrong or gone. */
+let dialledCode = '';
+/** Runs while a welcomed phone is reconnecting; on expiry the room counts as closed. */
+let goneTimer: ReturnType<typeof setTimeout> | undefined;
+/** Motion permission and steering mode are settled (only asked once, also when joining a new room). */
+let controlsReady = false;
+/** Our kart crossed the line this race (from the `finish` event); cleared when a new race starts. */
+let finished = false;
 
 // controls
 let gas = false;
@@ -160,12 +171,18 @@ function render(): void {
     const s = lastState;
     const inResults = s.phase === 'results';
     // position 0: this phone has no kart in the current race (it joined a slot without one)
+    const done = finished && s.phase === 'racing';
     els.statusText.textContent =
       s.phase === 'countdown'
         ? 'Get ready!'
         : s.position > 0
-          ? `${ordinal(s.position)} · Lap ${Math.min(s.lap, s.totalLaps)}/${s.totalLaps}`
+          ? done
+            ? `${ordinal(s.position)} · 🏁`
+            : `${ordinal(s.position)} · Lap ${Math.min(s.lap, s.totalLaps)}/${s.totalLaps}`
           : 'Next race!';
+    // Big and clear, but it lets touches through to the pads underneath.
+    els.finishBanner.hidden = !done;
+    if (done) els.finishBanner.textContent = s.position > 0 ? `Finished ${ordinal(s.position)}! 🏁` : 'Finished! 🏁';
 
     const empty = !s.rolling && !s.itemIcon;
     els.itemIcon.textContent = s.rolling ? '🎲' : (s.itemIcon ?? '🎁');
@@ -175,12 +192,13 @@ function render(): void {
     els.results.hidden = !inResults;
     if (inResults) {
       els.resultText.textContent =
-        s.position > 0 ? `${s.position === 1 ? '🏆 ' : ''}You finished ${ordinal(s.position)}!` : 'Race over!';
+        s.position > 0 ? `${s.position === 1 ? '🏆 ' : ''}You finished ${ordinal(s.position)}!` : 'Next race!';
       els.rematchBtn.hidden = !s.isHost;
       els.resultWait.hidden = s.isHost;
     }
   } else {
     els.results.hidden = true;
+    els.finishBanner.hidden = true;
   }
 
   els.steerBtns.hidden = !buttonSteer;
@@ -307,6 +325,7 @@ async function start(): Promise<void> {
     return;
   }
   started = true;
+  dialledCode = code;
   showJoinError('');
   setBusy(true);
   const typedName = els.nameInput.value.trim().slice(0, FALLBACK_NAME_MAX);
@@ -314,19 +333,21 @@ async function start(): Promise<void> {
   name = typedName || DEFAULT_NAME;
 
   // Permission prompts must be requested straight from the tap, before anything slow.
-  const granted = await askMotionPermission();
   void goLandscape();
-
-  if (granted) {
-    const got = await startMotion();
-    if (got) {
-      await sleep(SETTLE_MS);
-      neutral = roll;
+  if (!controlsReady) {
+    const granted = await askMotionPermission();
+    if (granted) {
+      const got = await startMotion();
+      if (got) {
+        await sleep(SETTLE_MS);
+        neutral = roll;
+      } else {
+        buttonSteer = true;
+      }
     } else {
       buttonSteer = true;
     }
-  } else {
-    buttonSteer = true;
+    controlsReady = true;
   }
 
   void requestWakeLock();
@@ -334,30 +355,54 @@ async function start(): Promise<void> {
   if (welcomed) return; // the earlier, slow attempt got in while we were waiting for motion
   const token = makeToken();
   link?.close(); // still looking for an earlier code in the background
-  link = connect(
-    code,
-    { token, name },
-    onServerMsg,
-    () => render(),
-  );
+  link = connect(code, { token, name }, onServerMsg, onLinkStatus);
   clearTimeout(joinTimer);
   joinTimer = setTimeout(() => cantFindRoom(code), JOIN_TIMEOUT_MS);
   render();
 }
 
 /**
- * No welcome in time: make the code editable and say so. The link keeps looking in the background,
- * so a TV that was just slow still lets this phone in; tapping start again dials the (edited) code.
+ * Back to the join screen with the code editable and a message. The link keeps looking in the
+ * background, so a TV that was just slow (or back) still lets this phone in; tapping start again
+ * dials the (edited) code.
  */
-function cantFindRoom(code: string): void {
-  if (welcomed) return;
+function askForCode(code: string, message: string): void {
   linkCode = '';
   els.roomChip.hidden = true;
   els.codeInput.hidden = false;
   els.codeInput.value = code;
   started = false;
   setBusy(false);
-  showJoinError(`Can't find room ${code} — check the code on the TV`);
+  showJoinError(message);
+  render();
+}
+
+/** No welcome in time: the code is probably wrong, or the TV is off. */
+function cantFindRoom(code: string): void {
+  if (welcomed) return;
+  askForCode(code, `Can't find room ${code} — check the code on the TV`);
+}
+
+/**
+ * After being in a room, a long reconnect means the TV app restarted and opened a new room with a new
+ * code: say so instead of "Reconnecting…" forever, and keep retrying quietly in case it comes back.
+ */
+function roomGone(): void {
+  goneTimer = undefined;
+  if (!welcomed || !link || link.status === 'open') return;
+  welcomed = false;
+  lastState = null;
+  finished = false;
+  askForCode(dialledCode, 'TV room closed — scan the new code on the TV');
+}
+
+function onLinkStatus(status: Link['status']): void {
+  if (status === 'open') {
+    clearTimeout(goneTimer);
+    goneTimer = undefined;
+  } else if (status === 'retrying' && welcomed && goneTimer === undefined) {
+    goneTimer = setTimeout(roomGone, ROOM_GONE_MS);
+  }
   render();
 }
 
@@ -375,6 +420,7 @@ function onServerMsg(m: ServerMsg): void {
       const wasCountdown = lastState?.phase === 'countdown';
       lastState = m;
       isHost = m.isHost;
+      if (m.phase !== 'racing' && m.phase !== 'results') finished = false; // a new race (or the lobby)
       // hands are on the wheel by the time the countdown starts: take that as straight ahead
       if (m.phase === 'countdown' && !wasCountdown) recenter();
       render();
@@ -382,6 +428,11 @@ function onServerMsg(m: ServerMsg): void {
     }
     case 'event':
       if (m.kind === 'hit') navigator.vibrate?.(200);
+      if (m.kind === 'finish') {
+        finished = true;
+        navigator.vibrate?.([80, 60, 80]);
+        render();
+      }
       break;
     case 'lobbyFull':
       clearTimeout(joinTimer);
@@ -477,7 +528,7 @@ els.codeInput.addEventListener('input', () => {
   els.codeInput.value = els.codeInput.value.toUpperCase().replace(/[^A-Z]/g, '');
 });
 
-/** Dev-only preview: ?demo=1 (driving), ?demo=lobby, ?demo=results; &slot=0..5 picks the kart colour. */
+/** Dev-only preview: ?demo=1 (driving), ?demo=lobby, ?demo=results, ?demo=finish; &slot=0..5 picks the kart colour. */
 function runDemo(kind: string): void {
   const slot = Number(params.get('slot') ?? 2) % KART_COLORS.length;
   setKartColor(KART_COLORS[slot]);
@@ -489,14 +540,15 @@ function runDemo(kind: string): void {
     t: 'state',
     phase: kind === 'lobby' ? 'lobby' : kind === 'results' ? 'results' : 'racing',
     isHost: true,
-    position: kind === 'results' ? 2 : 3,
+    position: kind === 'results' ? 2 : kind === 'finish' ? 1 : 3,
     racers: 6,
-    lap: 2,
+    lap: kind === 'finish' ? 3 : 2,
     totalLaps: 3,
     item: kind === 'results' ? null : 'rocket',
     itemIcon: kind === 'results' ? null : '🚀',
     rolling: params.get('rolling') === '1',
   };
+  finished = kind === 'finish';
   render();
   demoSteer = 0.45;
   showMeter(demoSteer);
