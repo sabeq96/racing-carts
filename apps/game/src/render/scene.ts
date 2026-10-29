@@ -18,6 +18,7 @@ import type { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 import { PAD_LENGTH, PAD_WIDTH } from '../race/boostPads';
 import type { Track } from '../track/track';
 import { ENV, HORIZON, SUN_DIR, skyMaterial } from './shaders';
+import { buildClouds, seeded } from './decor';
 
 export const PALETTE = {
   grass: '#BFE6A6',
@@ -46,18 +47,6 @@ const DASH_LENGTH = 3;
 const DASH_WIDTH = 0.5;
 const GRID_CLEAR = 24;
 const SCENERY_SEED = 20261029;
-
-/** Small deterministic PRNG (mulberry32) so the scenery is the same every boot. */
-function seeded(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 const HEMI_INTENSITY = 0.9;
 const SUN_INTENSITY = 0.6;
@@ -395,13 +384,6 @@ export function createScene(engine: Engine, track: Track): Scene {
   sun.diffuse = SUN_COLOR;
   sun.specular = Color3.Black();
 
-  buildSky(scene);
-  buildGround(scene, track);
-  buildRoad(scene, track);
-  buildBoostPads(scene, track);
-  buildWalls(scene, track);
-  buildScenery(scene, track);
-
   // Shared shader clock and camera framing, and fog that scales with the zoom. No allocations.
   scene.onBeforeRenderObservable.add(() => {
     ENV.x += Math.min(0.1, engine.getDeltaTime() / 1000);
@@ -413,5 +395,14 @@ export function createScene(engine: Engine, track: Track): Scene {
     scene.fogStart = cam.radius * FOG_START;
     scene.fogEnd = cam.radius * FOG_END;
   });
+
+  buildSky(scene);
+  buildGround(scene, track);
+  buildRoad(scene, track);
+  buildBoostPads(scene, track);
+  buildWalls(scene, track);
+  buildScenery(scene, track);
+  buildClouds(scene, track);
+
   return scene;
 }

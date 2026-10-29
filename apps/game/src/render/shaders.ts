@@ -119,3 +119,56 @@ void main() {
   m.disableDepthWrite = true;
   return m;
 }
+
+/** Puffy clouds: flat white with a soft lavender shade on the side away from the sun. */
+export function cloudMaterial(scene: Scene): ShaderMaterial {
+  return shader(
+    'cloud',
+    scene,
+    `attribute vec3 normal;
+varying vec3 vNormalW;
+void main() {
+  mat4 w = worldMatrix();
+  vec4 p = w * vec4(position, 1.0);
+  vPosW = p.xyz;
+  vNormalW = normalize((w * vec4(normal, 0.0)).xyz);
+  vDepth = (view * p).z;
+  gl_Position = viewProjection * p;
+}`,
+    `varying vec3 vNormalW;
+void main() {
+  vec3 n = normalize(vNormalW);
+  float hl = dot(n, SUN) * 0.5 + 0.5;
+  vec3 c = mix(vec3(0.87, 0.87, 0.96), vec3(1.0, 0.98, 0.95), smoothstep(0.3, 0.75, hl));
+  c *= mix(0.94, 1.0, smoothstep(-0.6, 0.2, n.y));
+  gl_FragColor = vec4(fog(c), 1.0);
+}`,
+    { attributes: ['normal'] },
+  );
+}
+
+/** Soft blurred-disc cloud shadow on a unit ground quad (uv 0..1), one instance per cloud. */
+export function cloudShadowMaterial(scene: Scene): ShaderMaterial {
+  const m = shader(
+    'cloudShadow',
+    scene,
+    `attribute vec2 uv;
+varying vec2 vUv;
+void main() {
+  vec4 p = worldMatrix() * vec4(position, 1.0);
+  vPosW = p.xyz;
+  vUv = uv;
+  vDepth = (view * p).z;
+  gl_Position = viewProjection * p;
+}`,
+    `varying vec2 vUv;
+void main() {
+  float r = length(vUv - 0.5) * 2.0;
+  float a = (1.0 - smoothstep(0.2, 1.0, r)) * 0.12;
+  gl_FragColor = vec4(vec3(0.24, 0.27, 0.4), a);
+}`,
+    { attributes: ['uv'], alpha: true },
+  );
+  m.disableDepthWrite = true;
+  return m;
+}
