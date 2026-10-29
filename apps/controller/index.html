@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#FFF3E4" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Racing Carts</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%8E%EF%B8%8F%3C/text%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;900&display=swap" rel="stylesheet" />
+  </head>
+  <body data-screen="join">
+    <div id="banner" class="banner" role="status" hidden>Reconnecting…</div>
+
+    <!-- 1. Join -->
+    <main id="join" class="screen">
+      <form id="joinForm" class="stack" autocomplete="off">
+        <h1 class="title"><span class="title-emoji">🏎️</span>Racing Carts</h1>
+        <div id="roomChip" class="chip" hidden>Room <strong id="roomChipCode"></strong></div>
+        <input id="codeInput" class="field code-field" type="text" inputmode="text" autocapitalize="characters"
+          autocorrect="off" spellcheck="false" maxlength="4" placeholder="ROOM" aria-label="Room code" />
+        <input id="nameInput" class="field" type="text" maxlength="12" placeholder="Your name" aria-label="Your name"
+          autocapitalize="words" autocomplete="nickname" />
+        <p id="joinError" class="error" role="alert" hidden></p>
+        <button id="startBtn" class="btn btn-go" type="submit">Tap to start</button>
+      </form>
+    </main>
+
+    <!-- 2. Waiting / lobby -->
+    <main id="lobby" class="screen">
+      <div class="stack">
+        <h1 class="title">You're in!</h1>
+        <div id="swatch" class="swatch" aria-hidden="true"><span>😎</span></div>
+        <p id="lobbyName" class="lobby-name"></p>
+        <button id="startRaceBtn" class="btn btn-go" type="button" hidden>Start race</button>
+        <p id="waitMsg" class="wait">Waiting for host…</p>
+      </div>
+    </main>
+
+    <!-- 3. Drive -->
+    <main id="drive" class="screen">
+      <header class="topbar">
+        <div id="statusText" class="status">&nbsp;</div>
+        <div class="meter" aria-hidden="true">
+          <div class="meter-mid"></div>
+          <div id="meterFill" class="meter-fill"></div>
+        </div>
+        <button id="centerBtn" class="btn btn-small btn-center" type="button">Center</button>
+      </header>
+      <div class="pads">
+        <button id="itemPad" class="pad pad-item empty" type="button">
+          <span id="itemIcon" class="pad-icon">🎁</span>
+          <span class="pad-label">ITEM</span>
+        </button>
+        <div class="mid">
+          <div id="steerBtns" class="steer-btns" hidden>
+            <button id="leftBtn" class="pad pad-steer" type="button" aria-label="Steer left">◀</button>
+            <button id="rightBtn" class="pad pad-steer" type="button" aria-label="Steer right">▶</button>
+          </div>
+          <button id="brakePad" class="pad pad-brake" type="button">BRAKE</button>
+        </div>
+        <button id="gasPad" class="pad pad-gas" type="button">
+          <span class="pad-icon">💨</span>
+          <span class="pad-label">GAS</span>
+        </button>
+      </div>
+
+      <div id="results" class="overlay" hidden>
+        <div class="card">
+          <p id="resultText" class="result-text"></p>
+          <button id="rematchBtn" class="btn btn-go" type="button" hidden>Rematch</button>
+          <p id="resultWait" class="wait" hidden>Waiting for host…</p>
+        </div>
+      </div>
+
+      <div class="rotate" aria-hidden="true">
+        <div class="rotate-icon">📱</div>
+        <p>Turn your phone sideways</p>
+      </div>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
