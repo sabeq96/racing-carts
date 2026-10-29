@@ -16,6 +16,8 @@ export interface NetHost {
 }
 
 const MAX_CODE_ATTEMPTS = 20;
+const RECONNECT_MS = 5000;
+const REJECT_CLOSE_MS = 200;
 const BROKER_ERRORS = new Set(['network', 'server-error', 'socket-error']);
 
 /** Opens a Peer under a fresh room code, retrying while the code is taken. */
@@ -51,8 +53,26 @@ export async function startHost(handlers: HostHandlers, rand?: () => number): Pr
   const { peer, code } = await openPeer(rand);
   const conns = new Map<string, DataConnection>();
 
+  // The broker socket can drop during a long session; keep the room reachable.
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleReconnect = (): void => {
+    if (reconnectTimer !== null || peer.destroyed || !peer.disconnected) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (peer.destroyed || !peer.disconnected) return;
+      try {
+        peer.reconnect();
+      } catch {
+        // retried below
+      }
+      scheduleReconnect();
+    }, RECONNECT_MS);
+  };
+  peer.on('disconnected', scheduleReconnect);
+
   peer.on('connection', (conn) => {
     let token: string | null = null;
+    let rejected = false;
 
     const dropped = (): void => {
       if (token !== null && conns.get(token) === conn) {
@@ -62,23 +82,30 @@ export async function startHost(handlers: HostHandlers, rand?: () => number): Pr
     };
 
     conn.on('data', (raw) => {
+      if (rejected) return;
       const msg = decodeClient(raw);
       if (token === null) {
         // First message must be a valid hello.
         if (!msg || msg.t !== 'hello') {
+          rejected = true;
           conn.close();
           return;
         }
-        const reply = handlers.onHello(msg.token, msg.name);
-        if (reply && reply.t === 'lobbyFull') {
-          conn.send(reply);
-          // Let the message flush before closing.
-          setTimeout(() => conn.close(), 200);
-          return;
-        }
+        // Register before onHello so the handler can send (e.g. welcome) to this token.
         const previous = conns.get(msg.token);
         token = msg.token;
         conns.set(token, conn);
+        const reply = handlers.onHello(msg.token, msg.name);
+        if (reply && reply.t === 'lobbyFull') {
+          if (previous) conns.set(msg.token, previous);
+          else conns.delete(msg.token);
+          token = null;
+          rejected = true;
+          conn.send(reply);
+          // Let the message flush before closing.
+          setTimeout(() => conn.close(), REJECT_CLOSE_MS);
+          return;
+        }
         if (previous && previous !== conn) previous.close(); // its close event is ignored: no longer current
         return;
       }
@@ -97,6 +124,8 @@ export async function startHost(handlers: HostHandlers, rand?: () => number): Pr
       if (conn && conn.open) conn.send(msg);
     },
     close() {
+      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
       conns.clear();
       peer.destroy();
     },

@@ -1,0 +1,158 @@
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+
+const { FakeConn, FakePeer } = vi.hoisted(() => {
+type Listener = (...args: any[]) => void;
+
+class FakeEmitter {
+  private listeners = new Map<string, Listener[]>();
+  on(ev: string, fn: Listener): this {
+    this.listeners.set(ev, [...(this.listeners.get(ev) ?? []), fn]);
+    return this;
+  }
+  emit(ev: string, ...args: any[]): void {
+    for (const fn of this.listeners.get(ev) ?? []) fn(...args);
+  }
+}
+
+class FakeConn extends FakeEmitter {
+  open = true;
+  sent: unknown[] = [];
+  closed = false;
+  send(m: unknown): void {
+    this.sent.push(m);
+  }
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.open = false;
+    this.emit('close');
+  }
+}
+
+class FakePeer extends FakeEmitter {
+  static last: FakePeer;
+  disconnected = false;
+  destroyed = false;
+  reconnects = 0;
+  constructor(public id: string) {
+    super();
+    FakePeer.last = this;
+    queueMicrotask(() => this.emit('open', id));
+  }
+  reconnect(): void {
+    this.reconnects++;
+  }
+  destroy(): void {
+    this.destroyed = true;
+  }
+}
+
+  return { FakeConn, FakePeer };
+});
+
+vi.mock('peerjs', () => ({ Peer: FakePeer }));
+
+import { startHost } from './host';
+
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
+
+const hello = (token: string) => ({ t: 'hello', token, name: 'N' });
+
+test('send inside onHello reaches the connection', async () => {
+  let host!: Awaited<ReturnType<typeof startHost>>;
+  host = await startHost({
+    onHello: (token) => {
+      host.send(token, { t: 'welcome', slot: 0, color: '#FF8A80' });
+      return null;
+    },
+    onMessage: () => {},
+    onDisconnect: () => {},
+  });
+  const conn = new FakeConn();
+  FakePeer.last.emit('connection', conn);
+  conn.emit('data', hello('a'));
+  expect(conn.sent).toEqual([{ t: 'welcome', slot: 0, color: '#FF8A80' }]);
+});
+
+test('lobbyFull is sent, connection closes, onDisconnect not fired, later data ignored', async () => {
+  const onDisconnect = vi.fn();
+  const onMessage = vi.fn();
+  const onHello = vi.fn(() => ({ t: 'lobbyFull' }) as const);
+  const host = await startHost({ onHello, onMessage, onDisconnect });
+  const conn = new FakeConn();
+  FakePeer.last.emit('connection', conn);
+  conn.emit('data', hello('a'));
+  expect(conn.sent).toEqual([{ t: 'lobbyFull' }]);
+  conn.emit('data', hello('a'));
+  conn.emit('data', { t: 'start' });
+  expect(onHello).toHaveBeenCalledTimes(1);
+  expect(onMessage).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(300);
+  expect(conn.closed).toBe(true);
+  expect(onDisconnect).not.toHaveBeenCalled();
+  host.send('a', { t: 'lobbyFull' });
+  expect(conn.sent).toHaveLength(1);
+});
+
+test('rejected hello for a known token keeps the previous connection', async () => {
+  let reject = false;
+  const onDisconnect = vi.fn();
+  const host = await startHost({
+    onHello: () => (reject ? { t: 'lobbyFull' } : null),
+    onMessage: () => {},
+    onDisconnect,
+  });
+  const old = new FakeConn();
+  FakePeer.last.emit('connection', old);
+  old.emit('data', hello('a'));
+  reject = true;
+  const fresh = new FakeConn();
+  FakePeer.last.emit('connection', fresh);
+  fresh.emit('data', hello('a'));
+  vi.advanceTimersByTime(300);
+  expect(old.closed).toBe(false);
+  host.send('a', { t: 'event', kind: 'hit' });
+  expect(old.sent).toEqual([{ t: 'event', kind: 'hit' }]);
+  expect(onDisconnect).not.toHaveBeenCalled();
+});
+
+test('newer connection replaces old one without onDisconnect; current close disconnects', async () => {
+  const onDisconnect = vi.fn();
+  await startHost({ onHello: () => null, onMessage: () => {}, onDisconnect });
+  const a = new FakeConn();
+  const b = new FakeConn();
+  FakePeer.last.emit('connection', a);
+  a.emit('data', hello('t'));
+  FakePeer.last.emit('connection', b);
+  b.emit('data', hello('t'));
+  expect(a.closed).toBe(true);
+  expect(onDisconnect).not.toHaveBeenCalled();
+  b.close();
+  expect(onDisconnect).toHaveBeenCalledWith('t');
+});
+
+test('non-hello first message closes the connection', async () => {
+  const onHello = vi.fn(() => null);
+  await startHost({ onHello, onMessage: () => {}, onDisconnect: () => {} });
+  const c = new FakeConn();
+  FakePeer.last.emit('connection', c);
+  c.emit('data', { t: 'start' });
+  expect(c.closed).toBe(true);
+  expect(onHello).not.toHaveBeenCalled();
+});
+
+test('broker drop triggers reconnect every 5 s until reconnected', async () => {
+  const host = await startHost({ onHello: () => null, onMessage: () => {}, onDisconnect: () => {} });
+  const peer = FakePeer.last;
+  peer.disconnected = true;
+  peer.emit('disconnected');
+  vi.advanceTimersByTime(5000);
+  expect(peer.reconnects).toBe(1);
+  vi.advanceTimersByTime(5000);
+  expect(peer.reconnects).toBe(2);
+  peer.disconnected = false;
+  vi.advanceTimersByTime(10000);
+  expect(peer.reconnects).toBe(2);
+  host.close();
+});
