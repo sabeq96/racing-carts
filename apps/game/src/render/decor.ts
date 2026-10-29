@@ -15,7 +15,7 @@ import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { KART_COLORS } from '@rc/shared';
-import { ENV, SUN_DIR, WIND_X, WIND_Z, cloudMaterial, cloudShadowMaterial, pondMaterial, toonMaterial } from './shaders';
+import { SUN_DIR, WIND_X, WIND_Z, cloudMaterial, cloudShadowMaterial, pondMaterial, toonMaterial } from './shaders';
 
 /** Small deterministic PRNG (mulberry32), so the world is the same every boot. */
 export function seeded(seed: number): () => number {
@@ -42,16 +42,16 @@ export interface Circle {
 
 // ----- pond -----
 
-/** A small pond in the big infield beside the start straight: water radius (m) and its sandy shore. */
+/** A small round pond in the big infield beside the start straight: water radius (m) and where its sandy shore ends. */
 export const POND = { x: 22, z: 6, r: 5 };
-export const POND_SHORE = 1.7;
+export const POND_OUTER = POND.r + 1.7;
 
 /** The pond: one alpha-blended disc drawn by the pond shader (water, shore ring, soft edge). */
 export function buildPond(scene: Scene): void {
-  const pond = CreateDisc('pond', { radius: POND.r * 1.11 + POND_SHORE, tessellation: 40 }, scene);
+  const pond = CreateDisc('pond', { radius: POND_OUTER, tessellation: 40 }, scene);
   pond.rotation.x = Math.PI / 2;
   pond.position.set(POND.x, 0.03, POND.z);
-  const mat = pondMaterial(POND.x, POND.z, POND.r, scene);
+  const mat = pondMaterial(POND.x, POND.z, POND.r, POND_OUTER, scene);
   mat.zOffset = -1;
   pond.material = mat;
   pond.isPickable = false;
@@ -179,11 +179,14 @@ export function buildClouds(scene: Scene, track: Track): void {
   }
 
   const at = { x: 0, z: 0 };
+  // The clouds' own clock: unlike the shader clock it never wraps (cloudAt wraps positions instead).
+  let time = 0;
   const sync = (): void => {
+    time += Math.min(0.1, scene.getEngine().getDeltaTime() / 1000);
     // Last frame's view-projection (column vectors in m[0..15]): where each cloud centre is on screen.
     const m = scene.getTransformMatrix().m;
     for (const c of clouds) {
-      cloudAt(c.x0, c.z0, ENV.x, area, at);
+      cloudAt(c.x0, c.z0, time, area, at);
       const s = c.size * edgeFade(at.x, at.z, area, CLOUD_EDGE);
       const w = at.x * m[3] + c.y * m[7] + at.z * m[11] + m[15];
       const sx = (at.x * m[0] + c.y * m[4] + at.z * m[8] + m[12]) / w;
@@ -259,7 +262,7 @@ export function fenceLayout(track: Track): { x: number; z: number }[][] {
 
 /** Room the fixed decorations need, so trees, rocks, flowers and bushes keep out of it. */
 export function fixedBlockers(track: Track): Circle[] {
-  const out: Circle[] = [{ x: POND.x, z: POND.z, r: POND.r * 1.11 + POND_SHORE }];
+  const out: Circle[] = [{ x: POND.x, z: POND.z, r: POND_OUTER }];
   for (const p of archLayout(track).posts) out.push({ x: p.x, z: p.z, r: 1 });
   // Along the bunting string, every few metres.
   for (let s = BUNTING_S[0]; s <= BUNTING_S[BUNTING_S.length - 1]; s += 3) {

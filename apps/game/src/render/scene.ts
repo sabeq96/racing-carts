@@ -15,13 +15,11 @@ import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
 import { CreateIcoSphere } from '@babylonjs/core/Meshes/Builders/icoSphereBuilder';
 import { CreateDisc } from '@babylonjs/core/Meshes/Builders/discBuilder';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
-import type { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 import { PAD_LENGTH, PAD_WIDTH } from '../race/boostPads';
 import type { Track } from '../track/track';
 import type { Texture } from '@babylonjs/core/Materials/Textures/texture';
-import { ENV, HORIZON, SUN_DIR, grassMaterial, noiseTexture, padMaterial, roadMaterial, toonMaterial } from './shaders';
+import { CLOCK, CLOCK_PERIOD, HORIZON, SUN_DIR, grassMaterial, noiseTexture, padMaterial, roadMaterial, toonMaterial } from './shaders';
 import { buildClouds, buildDecorations, buildPond, fixedBlockers, seeded, type Circle } from './decor';
-import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 
 export const PALETTE = {
   grass: '#BFE6A6',
@@ -312,13 +310,6 @@ function buildScenery(scene: Scene, track: Track, blocked: readonly Circle[]): C
       trunks.push(trunk);
       const canopy = CreateSphere('canopy', { diameter: 4.2 * size, segments: 6 }, scene);
       canopy.position.set(x, trunkH + 1.6 * size, z);
-      // For the sway shader: uv = (this tree's phase, the height where its foliage starts).
-      const uv = canopy.getVerticesData(VertexBuffer.UVKind) as number[];
-      for (let i = 0; i < uv.length; i += 2) {
-        uv[i] = x * 0.37 + z * 0.23;
-        uv[i + 1] = trunkH - 0.5 * size;
-      }
-      canopy.setVerticesData(VertexBuffer.UVKind, uv);
       canopies.push(canopy);
     } else {
       const rock = CreateIcoSphere('rock', { radius: 1.6 * size, subdivisions: 1, flat: true }, scene);
@@ -369,14 +360,9 @@ export function createScene(engine: Engine, track: Track): Scene {
   sun.diffuse = Color3.FromHexString('#FFE9CF');
   sun.specular = Color3.Black();
 
-  // Shared shader clock and camera framing. No allocations.
+  // The shared shader clock, wrapped seamlessly. No allocations.
   scene.onBeforeRenderObservable.add(() => {
-    ENV.x += Math.min(0.1, engine.getDeltaTime() / 1000);
-    const cam = scene.activeCamera as ArcRotateCamera | null;
-    if (!cam || cam.radius === undefined) return;
-    ENV.y = cam.target.x;
-    ENV.z = cam.target.z;
-    ENV.w = cam.radius;
+    CLOCK.x = (CLOCK.x + Math.min(0.1, engine.getDeltaTime() / 1000)) % CLOCK_PERIOD;
   });
 
   const noise = noiseTexture(scene);

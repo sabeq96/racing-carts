@@ -3,7 +3,7 @@ import { buildTrack } from '../track/track';
 import { TRACK_V1 } from '../track/trackDef';
 import {
   POND,
-  POND_SHORE,
+  POND_OUTER,
   archLayout,
   buntingLayout,
   centreDistance,
@@ -86,7 +86,7 @@ describe('cloud size on screen', () => {
 
 describe('pond', () => {
   test('the whole pond, shore included, stays at least width/2 + 8 m from the centre line', () => {
-    const outer = POND.r * 1.11 + POND_SHORE; // the waterline wobbles up to 11 % out
+    const outer = POND_OUTER;
     for (let a = 0; a < Math.PI * 2; a += Math.PI / 36) {
       const d = centreDistance(track, POND.x + Math.cos(a) * outer, POND.z + Math.sin(a) * outer);
       expect(d).toBeGreaterThanOrEqual(track.width / 2 + 8);
@@ -128,7 +128,7 @@ describe('decorations stay off the track', () => {
     const { flowers, bushes } = scatterLayout(track, blocked);
     expect(flowers.length).toBeGreaterThan(15);
     expect(bushes.length).toBeGreaterThan(8);
-    const pondOuter = POND.r * 1.11 + POND_SHORE;
+    const pondOuter = POND_OUTER;
     for (const c of [...flowers, ...bushes]) {
       expect(centreDistance(track, c.x, c.z)).toBeGreaterThanOrEqual(track.width / 2 + 2.5 + c.r);
       expect(Math.hypot(c.x - POND.x, c.z - POND.z)).toBeGreaterThan(pondOuter + c.r);
