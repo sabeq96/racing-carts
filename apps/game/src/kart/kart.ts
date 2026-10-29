@@ -39,7 +39,7 @@ export interface Kart {
   finishedAt: number | null;
 }
 
-export function createKart(id: number, color: string, slot: Track['grid'][number]): Kart {
+export function createKart(id: number, color: string, slot: Track['grid'][number], track: Track): Kart {
   return {
     id,
     color,
@@ -53,7 +53,7 @@ export function createKart(id: number, color: string, slot: Track['grid'][number
     rolling: null,
     itemPressed: false,
     distance: slot.s,
-    trackIndex: 0,
+    trackIndex: track.project(slot.pos).index,
     finishedAt: null,
   };
 }
@@ -106,13 +106,18 @@ export function stepKart(k: Kart, input: InputSnapshot, track: Track, dt: number
   k.pos.x += rx * push;
   k.pos.z += rz * push;
   const vLat = k.vel.x * rx + k.vel.z * rz;
-  if (vLat * side > 0) {
-    // Moving into the wall: reflect the lateral component with restitution.
+  // Speed of approach toward the wall (0 when already moving away).
+  const vIn = Math.max(0, vLat * side);
+  const f = Math.min(1, vIn / Math.max(1e-6, Math.hypot(k.vel.x, k.vel.z)));
+  if (vIn > 0) {
+    // Reflect the lateral component with restitution.
     k.vel.x -= rx * vLat * (1 + WALL_RESTITUTION);
     k.vel.z -= rz * vLat * (1 + WALL_RESTITUTION);
   }
-  k.speed *= WALL_SPEED_KEEP;
-  return { hitWall: true };
+  // Soft walls: speed loss and bump scale with impact; a scrape costs almost nothing.
+  k.speed *= 1 - (1 - WALL_SPEED_KEEP) * f * f;
+  k.heading -= side * Math.min(0.3, f * 0.5);
+  return { hitWall: vIn > 0.5 };
 }
 
 /** Separates overlapping karts and exchanges half their approach velocity. Returns ids of bumped pairs. */

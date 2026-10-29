@@ -37,7 +37,7 @@ function run(k: Kart, input: InputSnapshot, seconds: number, onStep?: (hit: bool
   }
 }
 
-const freshKart = () => createKart(0, '#FF8A80', track.grid[0]);
+const freshKart = () => createKart(0, '#FF8A80', track.grid[0], track);
 
 describe('kart physics', () => {
   test('full gas reaches but never exceeds MAX_SPEED', () => {
@@ -107,6 +107,51 @@ describe('kart physics', () => {
     expect(worst).toBeLessThanOrEqual(6 - KART_RADIUS + 1e-6);
   });
 
+  test('steer > 0 while reversing decreases heading', () => {
+    const k = freshKart();
+    k.speed = -4;
+    k.vel = { x: 0, z: -4 };
+    const h0 = k.heading;
+    stepKart(k, { ...brake, steer: 1 }, track, DT);
+    expect(k.heading).toBeLessThan(h0);
+  });
+
+  test('createKart seeds trackIndex from the track projection', () => {
+    const k = freshKart();
+    expect(k.trackIndex).toBe(track.project(track.grid[0].pos).index);
+  });
+
+  test('shallow wall scrape with gas keeps speed (soft walls)', () => {
+    const k = freshKart();
+    const s = 50;
+    k.pos = track.pointAt(s, 4.9);
+    k.heading = track.headingAt(s) + (3 * Math.PI) / 180; // ~3 degrees into the right wall
+    k.speed = 15;
+    k.vel = { x: Math.sin(k.heading) * 15, z: Math.cos(k.heading) * 15 };
+    k.trackIndex = track.project(k.pos).index;
+    let minSpeed = Infinity;
+    run(k, gas, 2, () => {
+      minSpeed = Math.min(minSpeed, k.speed);
+    });
+    expect(k.speed).toBeGreaterThan(12);
+    expect(minSpeed).toBeGreaterThan(12);
+  });
+
+  test('perpendicular wall hit at 15 m/s loses about 20% and reports hitWall', () => {
+    const k = freshKart();
+    const s = 50;
+    k.pos = track.pointAt(s, 4.9);
+    k.heading = track.headingAt(s) + Math.PI / 2;
+    k.speed = 15;
+    k.vel = { x: Math.sin(k.heading) * 15, z: Math.cos(k.heading) * 15 };
+    k.trackIndex = track.project(k.pos).index;
+    let hit = false;
+    for (let i = 0; i < 10 && !hit; i++) hit = stepKart(k, NEUTRAL_INPUT, track, DT).hitWall;
+    expect(hit).toBe(true);
+    expect(k.speed).toBeLessThanOrEqual(12.1);
+    expect(k.speed).toBeGreaterThan(11);
+  });
+
   test('spin ignores gas', () => {
     const k = freshKart();
     k.spin = 1.2;
@@ -119,7 +164,7 @@ describe('kart physics', () => {
 
   test('overlapping karts get separated', () => {
     const a = freshKart();
-    const b = createKart(1, '#82B1FF', track.grid[1]);
+    const b = createKart(1, '#82B1FF', track.grid[1], track);
     a.pos = { x: 0, z: 0 };
     b.pos = { x: 1, z: 0 };
     const pairs = resolveKartCollisions([a, b]);
